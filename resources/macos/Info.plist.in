@@ -33,9 +33,9 @@
 		<string>public.text</string>
 	</array>
 	<key>CFBundleIdentifier</key>
-	<string>com.lite-xl</string>
+	<string>com.trex.editor</string>
 	<key>CFBundleName</key>
-	<string>Lite XL</string>
+	<string>TreX</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>NSHighResolutionCapable</key>

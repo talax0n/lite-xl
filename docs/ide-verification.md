@@ -42,3 +42,9 @@ Design references are [VS Code's Git backend](https://github.com/microsoft/vscod
 and [PTY backend](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/node/terminalProcess.ts).
 The implementation adapts their separation of repository state, asynchronous Git
 operations, history views, and PTY sessions to Lite XL's Lua/C architecture.
+
+The TreX update adds an editor regression test for a non-Git workspace containing
+two nested repositories, repeated discovery without duplicates, the Git toolbar,
+and the TreX window title. The macOS FSEvents notification pipe now remains open
+across watch changes and is released after its reader thread exits. This fixes
+Git output being consumed through a reused file descriptor during discovery.

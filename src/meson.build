@@ -92,6 +92,7 @@ endif
 if dirmonitor_backend == 'inotify'
     lite_sources += 'api' / 'dirmonitor' / 'inotify.c'
 elif dirmonitor_backend == 'fsevents'
+    lite_cargs += '-DLITE_FSEVENTS'
     lite_sources += 'api' / 'dirmonitor' / 'fsevents.c'
 elif dirmonitor_backend == 'kqueue'
     lite_sources += 'api' / 'dirmonitor' / 'kqueue.c'

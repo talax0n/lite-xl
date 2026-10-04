@@ -78,7 +78,41 @@ function M.add(path)
   return repo
 end
 function M.discover()
-  for _, project in ipairs(core.projects) do M.add(project.path) end
+  if M.discovering then return end
+  M.discovering = true
+  local ok, err = pcall(function()
+    local settings = config.plugins.scm or {}
+    local limit, max_depth = settings.discovery_limit or 100, settings.discovery_depth or 3
+    local queue, seen = {}, {}
+    for _, project in ipairs(core.projects) do
+      M.add(project.path)
+      queue[#queue + 1] = {path = project.path, depth = 0}
+    end
+    local index, count = 1, 0
+    local excluded = {node_modules = true, vendor = true, build = true, dist = true, target = true}
+    while index <= #queue and count < limit do
+      local entry = queue[index]; index = index + 1
+      local path = system.absolute_path(entry.path) or entry.path
+      if not seen[path] then
+        seen[path] = true; count = count + 1
+        if system.get_file_info(path .. PATHSEP .. ".git") then M.add(path) end
+        if entry.depth < max_depth then
+          for _, name in ipairs(system.list_dir(path) or {}) do
+            if not name:match("^%.") and not excluded[name] and #queue < limit then
+              local child = path .. PATHSEP .. name
+              local info = system.get_file_info(child)
+              if info and info.type == "dir" then queue[#queue + 1] = {path = child, depth = entry.depth + 1} end
+            end
+          end
+        end
+        coroutine.yield(0)
+      end
+    end
+    M.discovery_limited = index <= #queue
+    M.generation = M.generation + 1; core.redraw = true
+  end)
+  M.discovering = false
+  if not ok then core.error("Repository discovery: %s", tostring(err)) end
 end
 function M.enqueue(repo, label, operation, done)
   repo.queue[#repo.queue + 1] = {label = label, operation = operation, done = done}

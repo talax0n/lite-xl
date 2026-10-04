@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
   signal(SIGPIPE, SIG_IGN);
 #endif
 
-  SDL_SetAppMetadata("Lite XL", LITE_PROJECT_VERSION_STR, "com.lite_xl.LiteXL");
+  SDL_SetAppMetadata("TreX", LITE_PROJECT_VERSION_STR, "com.trex.editor");
   if (!SDL_Init(SDL_INIT_EVENTS)) {
     fprintf(stderr, "Error initializing sdl: %s", SDL_GetError());
     exit(1);
@@ -198,7 +198,7 @@ init_lua:
     "    fp:close()\n"
     "    error_path = system.absolute_path(error_path)\n"
     "  end\n"
-    "  system.show_fatal_error('Lite XL internal error',\n"
+    "  system.show_fatal_error('TreX internal error',\n"
     "    'An internal error occurred in a critical part of the application.\\n\\n'..\n"
     "    'Error: '..tostring(err)..'\\n\\n'..\n"
     "    'Details can be found in \\\"'..error_path..'\\\"')\n"

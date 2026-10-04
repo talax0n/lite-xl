@@ -23,7 +23,8 @@ struct dirmonitor_internal* init_dirmonitor() {
   monitor->stream = NULL;
   monitor->changes = NULL;
   monitor->count = 0;
-  monitor->lock = NULL;
+  monitor->lock = SDL_CreateMutex();
+  pipe(monitor->fds);
 
   return monitor;
 }
@@ -40,9 +41,7 @@ static void stop_monitor_stream(struct dirmonitor_internal* monitor) {
     monitor->stream = NULL;
 
     SDL_LockMutex(monitor->lock);
-    write(monitor->fds[1], "", 1);
-    close(monitor->fds[0]);
-    close(monitor->fds[1]);
+
     if (monitor->count > 0) {
       for (size_t i = 0; i<monitor->count; i++) {
         SDL_free(monitor->changes[i]);
@@ -52,15 +51,21 @@ static void stop_monitor_stream(struct dirmonitor_internal* monitor) {
       monitor->count = 0;
     }
     SDL_UnlockMutex(monitor->lock);
-    SDL_DestroyMutex(monitor->lock);
+
   }
 }
 
 
 void deinit_dirmonitor(struct dirmonitor_internal* monitor) {
   stop_monitor_stream(monitor);
+  write(monitor->fds[1], "", 1);
 }
 
+void finalize_dirmonitor(struct dirmonitor_internal* monitor) {
+  close(monitor->fds[0]);
+  close(monitor->fds[1]);
+  SDL_DestroyMutex(monitor->lock);
+}
 
 static void stream_callback(
   ConstFSEventStreamRef streamRef,
@@ -144,9 +149,6 @@ int translate_changes_dirmonitor(
 
 int add_dirmonitor(struct dirmonitor_internal* monitor, const char* path) {
   stop_monitor_stream(monitor);
-
-  monitor->lock = SDL_CreateMutex();
-  pipe(monitor->fds);
 
   FSEventStreamContext context = {
     .info = monitor,

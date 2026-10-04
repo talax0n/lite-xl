@@ -23,6 +23,9 @@ int translate_changes_dirmonitor(struct dirmonitor_internal*, char*, int, int (*
 int add_dirmonitor(struct dirmonitor_internal*, const char*);
 void remove_dirmonitor(struct dirmonitor_internal*, int);
 int get_mode_dirmonitor();
+#ifdef LITE_FSEVENTS
+void finalize_dirmonitor(struct dirmonitor_internal*);
+#endif
 
 
 static int f_check_dir_callback(int watch_id, const char* path, void* L) {
@@ -90,6 +93,9 @@ static int f_dirmonitor_gc(lua_State* L) {
   deinit_dirmonitor(monitor->internal);
   SDL_UnlockMutex(monitor->mutex);
   SDL_WaitThread(monitor->thread, NULL);
+#ifdef LITE_FSEVENTS
+  finalize_dirmonitor(monitor->internal);
+#endif
   SDL_free(monitor->internal);
   SDL_DestroyMutex(monitor->mutex);
   return 0;

@@ -15,6 +15,7 @@ local panel, selected_repo, selected_file
 local explorer_was_visible
 local function set_visible(view, visible)
   view.visible = visible
+  if view.toolbar then view.toolbar.visible = visible end
   local explorer = package.loaded["plugins.treeview"]
   if explorer then
     if visible then explorer_was_visible = explorer.visible; explorer.visible = false
@@ -195,7 +196,7 @@ function Sidebar:draw()
       renderer.draw_text(style.font, row.entry.staged and "-" or "+", self.position.x + self.size.x - 20 * SCALE, ry, style.accent)
     end
   end
-  if #git.repositories == 0 then renderer.draw_text(style.font, "Use ... to add or clone a repository", x, start_y, style.dim) end
+  if #git.repositories == 0 then renderer.draw_text(style.font, git.discovering and "Discovering repositories..." or "Use ... to add or clone a repository", x, start_y, style.dim) end
   core.pop_clip_rect(); self:draw_scrollbar()
 end
 function Sidebar:on_mouse_pressed(button, x, y, clicks)
@@ -219,6 +220,9 @@ end
 local function ensure_panel()
   if panel then return panel end
   panel = Sidebar(); set_visible(panel, true); panel.node = core.root_view:get_primary_node():split("left", panel, {x = true}, true)
+  local ToolbarView = require "plugins.toolbarview"
+  panel.toolbar = ToolbarView()
+  panel.node:split("down", panel.toolbar, {y = true})
   core.add_thread(function()
     git.discover()
     local index = 0
@@ -243,21 +247,8 @@ local commands = {
   end,
   ["scm:scan-repositories"] = function()
     core.add_thread(function()
-      local count = 0
-      local function scan(path, depth)
-        if count >= options.discovery_limit then return end
-        count = count + 1
-        git.add(path)
-        if depth >= options.discovery_depth then return end
-        for _, name in ipairs(system.list_dir(path) or {}) do
-          if not name:match("^%.") and name ~= "node_modules" and name ~= "vendor" and name ~= "build" then
-            local child = path .. PATHSEP .. name; local info = system.get_file_info(child)
-            if info and info.type == "dir" then scan(child, depth + 1); coroutine.yield(0) end
-          end
-        end
-      end
-      for _, project in ipairs(core.projects) do scan(project.path, 0) end
-      core.log("Scanned %d folders; tracking %d repositories", count, #git.repositories)
+      git.discover()
+      core.log("Tracking %d repositories", #git.repositories)
     end)
   end,
   ["scm:remove-repository"] = function() with_repo(function(repo)
@@ -435,7 +426,7 @@ keymap.add({["ctrl+shift+g"] = "scm:toggle"})
 local old_add = core.add_project
 function core.add_project(...)
   local project = old_add(...)
-  if panel then core.add_thread(function() local repo = git.add(project.path); if repo then git.refresh(repo) end end) end
+  if panel then core.add_thread(function() git.discover(); for _, repo in ipairs(git.repositories) do if repo.dirty then git.refresh(repo) end end end) end
   return project
 end
 local Doc = require "core.doc"

@@ -7,6 +7,26 @@ function core.init(...)
   local keymap = require 'core.keymap'
   config.plugins.terminal.shell, config.plugins.terminal.args = '/bin/sh', {}
   local function verify()
+    local scm = require 'plugins.scm'
+    local workspace = assert(os.getenv('LITE_USERDIR')) .. '/workspace'
+    assert(system.mkdir(workspace))
+    workspace = assert(system.absolute_path(workspace))
+    for _, name in ipairs({'first', 'second'}) do
+      assert(system.mkdir(workspace .. '/' .. name))
+      local out, err = scm.git.exec(workspace, 'git', {'init', '-b', 'main', name})
+      assert(out, err)
+    end
+    -- A non-repository parent is the workspace shown in the reported failure.
+    core.add_project(workspace)
+    scm.git.discover()
+    assert(scm.git.by_root[workspace .. '/first'], 'First nested repository missing')
+    assert(scm.git.by_root[workspace .. '/second'], 'Second nested repository missing')
+    local total = #scm.git.repositories
+    scm.git.discover()
+    assert(#scm.git.repositories == total, 'Repeated discovery duplicated repositories')
+    local tree = require 'plugins.treeview'
+    assert(#tree.toolbar.toolbar_commands == 1 and tree.toolbar.toolbar_commands[1].command == 'scm:toggle', 'Git toolbar missing')
+    assert(core.compose_window_title('') == 'TreX', 'Window branding missing')
     assert(command.perform('scm:toggle'))
     assert(command.perform('terminal:new'))
     local panel = core.active_view
@@ -34,7 +54,7 @@ function core.init(...)
     command.perform('scm:toggle')
     coroutine.yield(0.1)
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
-    print('PASS: real editor plugin loading, pane layout, input, splits, and cleanup')
+    print('PASS: nested workspace repositories, Git toolbar, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)
   end
   core.add_thread(function()

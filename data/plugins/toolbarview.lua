@@ -16,14 +16,8 @@ function ToolbarView:new()
   self.init_size = true
   self.tooltip = false
   self.toolbar_font = style.icon_big_font
-  self.toolbar_commands = {
-    {symbol = "f", command = "core:new-doc"},
-    {symbol = "D", command = "core:open-file"},
-    {symbol = "S", command = "doc:save"},
-    {symbol = "L", command = "core:find-file"},
-    {symbol = "B", command = "core:find-command"},
-    {symbol = "P", command = "core:open-user-module"},
-  }
+  self.toolbar_commands = {{symbol = "G", command = "scm:toggle", git = true}}
+
 end
 
 
@@ -85,7 +79,19 @@ function ToolbarView:draw()
 
   for item, x, y, w, h in self:each_item() do
     local color = item == self.hovered_item and command.is_valid(item.command) and style.text or style.dim
-    common.draw_text(item.font or self.toolbar_font, color, item.symbol, nil, x, y, 0, h)
+    if item.git then
+      local t = math.max(1, math.floor(2 * SCALE))
+      local left, right, top, bottom = x + w * 0.25, x + w * 0.75, y + h * 0.2, y + h * 0.8
+      local middle = y + h * 0.55
+      renderer.draw_rect(left, top, t, bottom - top, color)
+      renderer.draw_rect(right, top, t, middle - top, color)
+      renderer.draw_rect(left, middle, right - left + t, t, color)
+      for _, point in ipairs({{left, top}, {right, top}, {left, bottom}}) do
+        renderer.draw_rect(point[1] - t, point[2] - t, t * 3, t * 3, color)
+      end
+    else
+      common.draw_text(item.font or self.toolbar_font, color, item.symbol, nil, x, y, 0, h)
+    end
   end
 end
 

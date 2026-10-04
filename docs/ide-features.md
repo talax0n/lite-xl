@@ -12,8 +12,9 @@ Each repository has its own branch, incoming/outgoing counts, staged changes,
 working changes, conflicts, commit draft, history, and operation queue. Click a
 repository heading to select the target for toolbar actions. Use **Select
 Repository** when several repositories are open. **Add Repository** accepts any
-local checkout, including a worktree. Workspace folders are discovered when
-Source Control opens. **Scan Repositories** searches nested folders explicitly;
+local checkout, including a worktree. Workspace folders and nested repositories are discovered automatically when
+Source Control opens. The scan visits siblings before deeper folders.
+**Scan Repositories** repeats discovery on demand;
 it defaults to three levels and 100 folders, skipping hidden directories,
 node_modules, vendor, and build. Add repositories manually beyond that limit.
 
@@ -137,14 +138,14 @@ meson setup build-macos --buildtype=release -Dportable=true -Dbundle=false
 meson compile -C build-macos
 scripts/test-ide.sh build-macos
 scripts/package-custom-macos.sh build-macos
-open "build-macos/Custom Lite XL.app"
+open "build-macos/TreX.app"
 ```
 
 For later rebuilds, repeat the compile, test, and package commands. Quit the
 custom app before replacing its bundle. The package has an ad-hoc local
 signature and a separate application identifier.
 
-To install it, quit both editor apps, then copy `Custom Lite XL.app` from the
+To install it, quit both editor apps, then copy `TreX.app` from the
 build directory into `/Applications` using Finder. Launch that copy and check
 Source Control and the terminal. You can then move the original `Lite XL.app`
 to Trash and replace its Dock shortcut with the custom app. Keep your user
@@ -152,7 +153,7 @@ configuration directory; both applications use the existing Lite XL settings
 unless `LITE_USERDIR` overrides it. Removing the application bundle does not
 require deleting settings or projects.
 
-The already-built app is `build-release/Custom Lite XL.app`. It can be copied
+The already-built app is `build-release/TreX.app`. It can be copied
 into Applications without rebuilding. This build links to Homebrew PCRE2 at
 `/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib`, so keep PCRE2 installed. Builds
 made with other dependency configurations may also need those libraries on the

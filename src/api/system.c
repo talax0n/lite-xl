@@ -499,6 +499,20 @@ static int f_set_window_bordered(lua_State *L) {
 }
 
 
+#ifdef __APPLE__
+void macos_set_titlebar_color(SDL_Window *window, double r, double g, double b);
+#endif
+static int f_set_window_titlebar_color(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**) luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+#ifdef __APPLE__
+  macos_set_titlebar_color(window_renderer->window, luaL_checknumber(L, 2) / 255.0, luaL_checknumber(L, 3) / 255.0, luaL_checknumber(L, 4) / 255.0);
+#else
+  (void) window_renderer;
+#endif
+  return 0;
+}
+
+
 static int f_set_window_hit_test(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**) luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
   if (lua_gettop(L) == 1) {
@@ -1497,6 +1511,7 @@ static const luaL_Reg lib[] = {
   { "get_window_mode",       f_get_window_mode       },
   { "set_window_bordered",   f_set_window_bordered   },
   { "set_window_hit_test",   f_set_window_hit_test   },
+  { "set_window_titlebar_color", f_set_window_titlebar_color },
   { "get_window_size",       f_get_window_size       },
   { "set_window_size",       f_set_window_size       },
   { "set_text_input_rect",   f_set_text_input_rect   },

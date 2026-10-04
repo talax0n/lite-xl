@@ -216,6 +216,7 @@ local function ensure_panel()
 end
 local M = {}
 function M.open(cwd, shell, args) ensure_panel():add(cwd, shell, args) end
+function M.panel() return panel end
 command.add(nil, {
   ["terminal:toggle"] = function()
     local p = ensure_panel()

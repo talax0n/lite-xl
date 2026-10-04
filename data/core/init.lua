@@ -2,7 +2,7 @@ require "core.strict"
 require "core.regex"
 local common = require "core.common"
 local config = require "core.config"
-local style = require "colors.default"
+local style = require "colors.rose_pine_moon"
 local command
 local keymap
 local dirwatch
@@ -256,6 +256,10 @@ function core.configure_borderless_window()
   system.set_window_bordered(core.window, not config.borderless)
   core.title_view:configure_hit_test(config.borderless)
   core.title_view.visible = config.borderless
+  if not config.borderless then
+    local bg = style.background
+    system.set_window_titlebar_color(core.window, bg[1], bg[2], bg[3])
+  end
 end
 
 
@@ -665,6 +669,7 @@ function core.reload_module(name)
     for k, v in pairs(new) do old[k] = v end
     package.loaded[name] = old
   end
+  if name:match("^colors%.") and core.window and core.title_view then core.configure_borderless_window() end
 end
 
 

@@ -9,13 +9,12 @@ local View = require "core.view"
 local git = require "plugins.scm.git"
 local views = require "plugins.scm.views"
 
-config.plugins.scm = common.merge({width = 320, refresh_interval = 5, discovery_depth = 3, discovery_limit = 100}, config.plugins.scm)
+config.plugins.scm = common.merge({width = 320, refresh_interval = 5, fetch_interval = 180, discovery_depth = 3, discovery_limit = 100}, config.plugins.scm)
 local options = config.plugins.scm
 local panel, selected_repo, selected_file
 local explorer_was_visible
 local function set_visible(view, visible)
   view.visible = visible
-  if view.toolbar then view.toolbar.visible = visible end
   local explorer = package.loaded["plugins.treeview"]
   if explorer then
     if visible then explorer_was_visible = explorer.visible; explorer.visible = false
@@ -117,30 +116,39 @@ local function diff(repo, entry)
     show_output((entry.staged and "Staged: " or "Changes: ") .. entry.path, out ~= "" and out or "No text diff. This may be a binary file or submodule.", actions)
   end)
 end
-local function history(repo)
-  git.history(repo, function()
-    views.open(views.Graph(repo, git, function(commit)
-      git.enqueue(repo, "Inspect commit", function()
-        return git.git(repo, {"show", "--no-ext-diff", "--no-textconv", "--format=fuller", "--stat", "--patch", commit.hash, "--"})
-      end, function(out)
-        if out then show_output(commit.hash:sub(1, 8) .. ": " .. commit.subject, out, {
-          {text = "Copy hash", fn = function() system.set_clipboard(commit.hash) end},
-          {text = "Compare with HEAD", fn = function() show_git(repo, "Compare commit", {"diff", "--no-ext-diff", "--no-textconv", commit.hash, "HEAD", "--"}) end},
-          {text = "Open on GitHub", fn = function()
-            git.enqueue(repo, "Open commit on GitHub", function() return git.exec(repo.root, "gh", {"browse", commit.hash}) end)
-          end},
-          {text = "Revert", fn = function()
-            confirm("Revert commit", "Create a commit reverting " .. commit.hash:sub(1, 8) .. "?", function() operation(repo, "Revert", {"revert", "--no-edit", commit.hash}) end)
-          end},
-          {text = "Cherry-pick", fn = function() confirm("Cherry-pick", "Apply " .. commit.hash:sub(1, 8) .. " to the current branch?", function() operation(repo, "Cherry-pick", {"cherry-pick", commit.hash}) end) end},
-        }) end
-      end)
-    end))
-  end, true)
+local function inspect(repo, commit)
+  git.enqueue(repo, "Inspect commit", function()
+    return git.git(repo, {"show", "--no-ext-diff", "--no-textconv", "--format=fuller", "--stat", "--patch", commit.hash, "--"})
+  end, function(out)
+    if out then show_output(commit.hash:sub(1, 8) .. ": " .. commit.subject, out, {
+      {text = "Copy hash", fn = function() system.set_clipboard(commit.hash) end},
+      {text = "Compare with HEAD", fn = function() show_git(repo, "Compare commit", {"diff", "--no-ext-diff", "--no-textconv", commit.hash, "HEAD", "--"}) end},
+      {text = "Open on GitHub", fn = function()
+        git.enqueue(repo, "Open commit on GitHub", function() return git.exec(repo.root, "gh", {"browse", commit.hash}) end)
+      end},
+      {text = "Revert", fn = function()
+        confirm("Revert commit", "Create a commit reverting " .. commit.hash:sub(1, 8) .. "?", function() operation(repo, "Revert", {"revert", "--no-edit", commit.hash}) end)
+      end},
+      {text = "Cherry-pick", fn = function() confirm("Cherry-pick", "Apply " .. commit.hash:sub(1, 8) .. " to the current branch?", function() operation(repo, "Cherry-pick", {"cherry-pick", commit.hash}) end) end},
+    }) end
+  end)
 end
+local function history(repo)
+  git.history(repo, function() views.open(views.Graph(repo, git, function(commit) inspect(repo, commit) end)) end, true)
+end
+local function change_count(repo) local s = repo.status; return #s.changes + #s.staged + #s.conflicts end
+local function stage_all(repo) operation(repo, "Stage all", {"add", "--all", "--", "."}) end
+local function unstage_all(repo)
+  if repo.status.head == "(initial)" then operation(repo, "Unstage all", {"rm", "--cached", "-r", "--", "."})
+  else operation(repo, "Unstage all", {"restore", "--staged", "--", "."}) end
+end
+
 local Sidebar = View:extend()
+local collapsed = {}
+local GRAPH_ROWS = 20
+local lane_colors = {{115, 175, 245}, {230, 150, 100}, {145, 200, 120}, {190, 135, 220}, {220, 195, 100}, {100, 200, 200}}
 function Sidebar:new()
-  Sidebar.super.new(self); self.visible = true; self.scrollable = true; self.rows = {}; self.generation = -1; self.size.x = options.width * SCALE
+  Sidebar.super.new(self); self.visible = true; self.scrollable = true; self.rows = {}; self.height = 0; self.generation = -1; self.size.x = options.width * SCALE
 end
 function Sidebar:get_name() return "Source Control" end
 function Sidebar:get_size() return self.visible and options.width * SCALE or 0, 0 end
@@ -148,95 +156,280 @@ function Sidebar:set_target_size(axis, width)
   if axis == "x" then options.width = math.max(200, width / SCALE); core.redraw = true; return true end
 end
 local function lh() return style.font:get_height() + style.padding.y end
-function Sidebar:get_scrollable_size() return (#self.rows + 5) * lh() end
+local function header_h() return math.floor(lh() * 1.5) end
+function Sidebar:get_scrollable_size() return header_h() + self.height + lh() * 2 end
 function Sidebar:get_h_scrollable_size() return self.size.x end
 function Sidebar:on_mouse_wheel(y) self.scroll.to.y = self.scroll.to.y - y * lh() * 3; return true end
+function Sidebar:rebuild()
+  local rows, repo = {}, current()
+  self.generation, self.repo = git.generation, repo
+  local function add(row) row.h = row.h or lh(); rows[#rows + 1] = row end
+  add({kind = "section", key = "repos", text = "REPOSITORIES"})
+  if not collapsed.repos then
+    for _, r in ipairs(git.repositories) do add({kind = "repo", repo = r}) end
+    if #git.repositories == 0 then add({kind = "note", text = git.discovering and "Discovering repositories..." or "Use … to add or clone a repository"}) end
+  end
+  if repo then
+    local status = repo.status
+    add({kind = "section", key = "changes", text = "CHANGES"})
+    if not collapsed.changes then
+      add({kind = "message", repo = repo, h = math.floor(lh() * 1.6)})
+      add({kind = "commit", repo = repo, h = math.floor(lh() * 1.7)})
+      if status.limited then add({kind = "note", color = style.error, text = "Preview limited to 10,000 files. Use terminal for more."}) end
+      if repo.busy then add({kind = "note", text = repo.busy .. "..."}) end
+      if repo.error then add({kind = "note", color = style.error, text = repo.error:match("[^\r\n]+") or repo.error}) end
+      for _, group in ipairs({{"Merge Changes", status.conflicts}, {"Staged Changes", status.staged, true}, {"Changes", status.changes}}) do
+        if #group[2] > 0 then
+          local key = repo.root .. ":" .. group[1]
+          add({kind = "group", repo = repo, key = key, text = group[1], count = #group[2], staged = group[3]})
+          if not collapsed[key] then for _, entry in ipairs(group[2]) do add({kind = "file", repo = repo, entry = entry}) end end
+        end
+      end
+      if change_count(repo) == 0 and not repo.busy then add({kind = "note", text = "No changes"}) end
+    end
+    add({kind = "section", key = "graph", text = "GRAPH", actions = {
+      {"↓", function() operation(repo, "Pull", {"pull", "--ff-only"}) end},
+      {"↑", function() operation(repo, "Push", {"push"}) end},
+      {"…", function() history(repo) end},
+    }})
+    if not collapsed.graph then
+      if status.head and repo.graph_head ~= status.head and not repo.worker then
+        repo.graph_head = status.head; git.history(repo, nil, true)
+      end
+      for i = 1, math.min(GRAPH_ROWS, #repo.history) do add({kind = "graph", repo = repo, commit = repo.history[i], first = i == 1, last = i == math.min(GRAPH_ROWS, #repo.history)}) end
+      if #repo.history > 0 then add({kind = "more", repo = repo, text = "View full graph"}) end
+    end
+  end
+  local y = 0
+  for _, row in ipairs(rows) do row.y = y; y = y + row.h end
+  self.rows, self.height = rows, y
+end
 function Sidebar:update()
   local width = self.visible and options.width * SCALE or 0
   if self.size.x ~= width then self.size.x = width; core.redraw = true end
   Sidebar.super.update(self)
-  if self.generation == git.generation then return end
-  self.generation = git.generation; self.rows = {}
-  for _, repo in ipairs(git.repositories) do
-    local status = repo.status
-    self.rows[#self.rows + 1] = {kind = "repo", repo = repo, text = repo.name .. "  " .. (status.branch or "") .. "  +" .. (status.ahead or 0) .. "/-" .. (status.behind or 0)}
-    if status.limited then self.rows[#self.rows + 1] = {kind = "error", repo = repo, text = "Preview limited to 10,000 files. Use terminal for more."} end
-    if repo.busy then self.rows[#self.rows + 1] = {kind = "label", repo = repo, text = repo.busy .. "..."} end
-    if repo.error then self.rows[#self.rows + 1] = {kind = "error", repo = repo, text = repo.error:match("[^\r\n]+") or repo.error} end
-    for _, group in ipairs({{"Conflicts", status.conflicts}, {"Staged Changes", status.staged}, {"Changes", status.changes}}) do
-      if #group[2] > 0 then
-        self.rows[#self.rows + 1] = {kind = "label", repo = repo, text = group[1] .. " (" .. #group[2] .. ")"}
-        for _, entry in ipairs(group[2]) do self.rows[#self.rows + 1] = {kind = "file", repo = repo, entry = entry, text = entry.status .. "  " .. entry.path} end
-      end
+  if self.generation ~= git.generation or self.repo ~= current() then self:rebuild() end
+end
+local function status_color(s)
+  if s == "M" or s == "T" then return style.warn end
+  if s == "A" or s == "?" then return style.good end
+  if s == "D" or s == "!" then return style.error end
+  return style.caret
+end
+local function text_w(font, text) return font:get_width(text) end
+-- Draws a clickable glyph right-aligned at `right`; returns its left edge.
+function Sidebar:button(row, font, text, right, y, h, fn)
+  local w = text_w(font, text) + style.padding.x
+  local x = right - w
+  local hovered = self.hover_x and self.hover_row == row and self.hover_x >= x and self.hover_x < right
+  if hovered then renderer.draw_rect(x, y + 2 * SCALE, w, h - 4 * SCALE, style.line_highlight) end
+  common.draw_text(font, hovered and style.accent or style.text, text, "center", x, y, w, h)
+  row.buttons[#row.buttons + 1] = {x1 = x, x2 = right, fn = fn}
+  return x
+end
+function Sidebar:draw_row(row, x, y, w)
+  local pad, h = style.padding.x, row.h
+  local right = x + w - pad
+  local hovered = self.hover_row == row
+  row.buttons = {}
+  if row.kind == "section" then
+    common.draw_text(style.icon_font, style.text, collapsed[row.key] and "+" or "-", nil, x + pad * 0.5, y, 0, h)
+    common.draw_text(style.font, style.accent, row.text, nil, x + pad * 0.5 + 18 * SCALE, y, 0, h)
+    for i = #(row.actions or {}), 1, -1 do right = self:button(row, style.font, row.actions[i][1], right, y, h, row.actions[i][2]) end
+  elseif row.kind == "repo" then
+    local repo, status = row.repo, row.repo.status
+    local selected = repo == self.repo
+    if selected then renderer.draw_rect(x, y, w, h, style.selection) elseif hovered then renderer.draw_rect(x, y, w, h, style.line_highlight) end
+    right = self:button(row, style.font, "…", right, y, h, function() selected_repo, selected_file = repo, nil; command.perform("scm:actions") end)
+    if (status.ahead or 0) + (status.behind or 0) > 0 then
+      right = self:button(row, style.font, "↓" .. status.behind .. " ↑" .. status.ahead, right, y, h, function() selected_repo = repo; command.perform("scm:sync") end)
     end
-    if #status.changes + #status.staged + #status.conflicts == 0 and not repo.busy then self.rows[#self.rows + 1] = {kind = "label", repo = repo, text = "Working tree clean"} end
+    local branch = (status.branch or "") .. (change_count(repo) > 0 and "*" or "")
+    local bw = text_w(style.font, branch)
+    right = right - bw - pad * 0.5
+    common.draw_text(style.font, style.text, branch, nil, right, y, bw, h)
+    local gs = math.floor(14 * SCALE)
+    local gx, gy = right - gs - 4 * SCALE, y + (h - gs) / 2
+    local t = math.max(1, math.floor(SCALE))
+    renderer.draw_rect(gx + gs * 0.3, gy + gs * 0.15, t, gs * 0.7, style.dim)
+    renderer.draw_rect(gx + gs * 0.7, gy + gs * 0.15, t, gs * 0.4, style.dim)
+    renderer.draw_rect(gx + gs * 0.3, gy + gs * 0.55, gs * 0.4 + t, t, style.dim)
+    right = gx - pad * 0.5
+    common.draw_text(style.icon_font, selected and style.accent or style.dim, "d", nil, x + pad * 1.5, y, 0, h)
+    core.push_clip_rect(x, y, math.max(0, right - x), h)
+    common.draw_text(style.font, selected and style.accent or style.text, repo.name, nil, x + pad * 1.5 + 22 * SCALE, y, 0, h)
+    core.pop_clip_rect()
+  elseif row.kind == "message" then
+    local repo = row.repo
+    local bx, by, bw, bh = x + pad, y + 3 * SCALE, w - pad * 2, h - 6 * SCALE
+    renderer.draw_rect(bx, by, bw, bh, hovered and style.selection or style.line_highlight)
+    renderer.draw_rect(bx, by + bh - math.max(1, SCALE), bw, math.max(1, SCALE), hovered and style.caret or style.divider)
+    local text = repo.message:match("[^\r\n]*") or ""
+    core.push_clip_rect(bx, by, bw, bh)
+    common.draw_text(style.font, text ~= "" and style.accent or style.dim, text ~= "" and text or 'Message (Enter to commit on "' .. (repo.status.branch or "HEAD") .. '")', nil, bx + pad * 0.75, by, 0, bh)
+    core.pop_clip_rect()
+    row.buttons[1] = {x1 = bx, x2 = bx + bw, fn = function() command.perform("scm:commit") end}
+  elseif row.kind == "commit" then
+    local repo = row.repo
+    local bx, by, bw, bh = x + pad, y + 4 * SCALE, w - pad * 2, h - 8 * SCALE
+    local enabled = change_count(repo) > 0
+    local color = enabled and style.caret or style.selection
+    renderer.draw_rect(bx, by, bw, bh, color)
+    if hovered and enabled then renderer.draw_rect(bx, by, bw, bh, {255, 255, 255, 30}) end
+    local label = #repo.status.staged == 0 and #repo.status.changes > 0 and "Commit All" or "Commit"
+    common.draw_text(style.font, enabled and style.background2 or style.dim, label, "center", bx, by, bw, bh)
+    row.buttons[1] = {x1 = bx, x2 = bx + bw, fn = function() if enabled then command.perform("scm:commit") end end}
+  elseif row.kind == "group" then
+    if hovered then renderer.draw_rect(x, y, w, h, style.line_highlight) end
+    common.draw_text(style.icon_font, style.text, collapsed[row.key] and "+" or "-", nil, x + pad, y, 0, h)
+    common.draw_text(style.font, style.text, row.text, nil, x + pad + 18 * SCALE, y, 0, h)
+    local label = tostring(row.count)
+    local pw, ph = math.max(lh() * 0.9, text_w(style.font, label) + 10 * SCALE), lh() * 0.8
+    renderer.draw_rect(right - pw, y + (h - ph) / 2, pw, ph, style.selection)
+    common.draw_text(style.font, style.accent, label, "center", right - pw, y, pw, h)
+    right = right - pw - 4 * SCALE
+    if hovered and row.text ~= "Merge Changes" then
+      local repo = row.repo
+      self:button(row, style.font, row.staged and "−" or "+", right, y, h, function() if row.staged then unstage_all(repo) else stage_all(repo) end end)
+    end
+  elseif row.kind == "file" then
+    local entry = row.entry
+    if entry == selected_file then renderer.draw_rect(x, y, w, h, style.selection) elseif hovered then renderer.draw_rect(x, y, w, h, style.line_highlight) end
+    local letter = entry.status == "?" and "U" or entry.status
+    local color = status_color(entry.status)
+    local lw = text_w(style.code_font, "M") + pad * 0.5
+    common.draw_text(style.code_font, color, letter, "center", right - lw, y, lw, h)
+    right = right - lw
+    if hovered and entry.status ~= "!" then
+      local repo = row.repo
+      right = self:button(row, style.font, entry.staged and "−" or "+", right, y, h, function() if entry.staged then unstage(repo, entry) else stage(repo, entry) end end)
+      if not entry.staged then right = self:button(row, style.icon_font, "C", right, y, h, function() discard(repo, entry) end) end
+    end
+    local name = entry.path:match("[^/]+$") or entry.path
+    local dir = entry.path:sub(1, #entry.path - #name - 1)
+    local fx = x + pad * 2
+    core.push_clip_rect(x, y, math.max(0, right - x - 4 * SCALE), h)
+    fx = common.draw_text(style.font, entry.status == "D" and style.dim or style.accent, name, nil, fx, y, 0, h)
+    if dir ~= "" then common.draw_text(style.font, style.dim, dir, nil, fx + pad * 0.6, y, 0, h) end
+    core.pop_clip_rect()
+  elseif row.kind == "graph" then
+    local c = row.commit
+    if hovered then renderer.draw_rect(x, y, w, h, style.line_highlight) end
+    local color = lane_colors[((c.lane or 1) - 1) % #lane_colors + 1]
+    local cx, t = x + pad * 1.5, math.max(1, math.floor(2 * SCALE))
+    renderer.draw_rect(cx - t / 2, row.first and y + h / 2 or y, t, (row.first or row.last) and h / 2 or h, color)
+    local d = math.floor(8 * SCALE)
+    renderer.draw_rect(cx - d / 2, y + (h - d) / 2, d, d, row.first and style.background2 or color)
+    if row.first then
+      renderer.draw_rect(cx - d / 2, y + (h - d) / 2, d, t, color); renderer.draw_rect(cx - d / 2, y + (h + d) / 2 - t, d, t, color)
+      renderer.draw_rect(cx - d / 2, y + (h - d) / 2, t, d, color); renderer.draw_rect(cx + d / 2 - t, y + (h - d) / 2, t, d, color)
+    end
+    local ref = c.refs:match("HEAD %-> ([^,]+)") or (c.refs:match("^tag: ([^,]+)"))
+    if ref then
+      local rw = text_w(style.font, ref) + pad
+      renderer.draw_rect(right - rw, y + 3 * SCALE, rw, h - 6 * SCALE, style.selection)
+      common.draw_text(style.font, style.accent, ref, "center", right - rw, y, rw, h)
+      right = right - rw - 4 * SCALE
+    end
+    core.push_clip_rect(x, y, math.max(0, right - x), h)
+    local tx = common.draw_text(style.font, row.first and style.accent or style.text, c.subject, nil, cx + pad, y, 0, h)
+    common.draw_text(style.font, style.dim, c.author, nil, tx + pad * 0.6, y, 0, h)
+    core.pop_clip_rect()
+  elseif row.kind == "more" then
+    common.draw_text(style.font, hovered and style.accent or style.text, row.text, nil, x + pad * 1.5, y, 0, h)
+  else
+    core.push_clip_rect(x, y, w, h)
+    common.draw_text(style.font, row.color or style.dim, row.text, nil, x + pad * 2, y, 0, h)
+    core.pop_clip_rect()
   end
 end
 function Sidebar:draw()
   if not self.visible then return end
   self:draw_background(style.background2)
-  local x, y = self.position.x + style.padding.x, self.position.y + style.padding.y
-  renderer.draw_text(style.font, "SOURCE CONTROL", x, y, style.text)
-  self.buttons = {}; y = y + lh(); local bx = x
-  for _, b in ipairs({{"Commit", "scm:commit"}, {"Pull", "scm:pull"}, {"Push", "scm:push"}, {"Graph", "scm:history"}, {"...", "scm:actions"}}) do
-    local w = style.font:get_width(b[1]) + style.padding.x
-    renderer.draw_text(style.font, b[1], bx, y, style.accent); self.buttons[#self.buttons + 1] = {x = bx, w = w, cmd = b[2]}; bx = bx + w
-  end
-  local start_y = self.position.y + lh() * 3 - self.scroll.y
-  core.push_clip_rect(self.position.x, self.position.y + lh() * 3, self.size.x, self.size.y - lh() * 3)
-  local first = math.max(1, math.floor(self.scroll.y / lh()))
-  local last = math.min(#self.rows, first + math.ceil(self.size.y / lh()))
-  for i = first, last do
-    local row = self.rows[i]; local ry = start_y + (i - 1) * lh()
-    if row.repo == selected_repo and (row.kind == "repo" or row.entry == selected_file) then renderer.draw_rect(self.position.x, ry, self.size.x, lh(), style.line_highlight) end
-    local color = row.kind == "repo" and style.accent or row.kind == "error" and {230, 120, 120} or row.kind == "label" and style.dim or style.text
-    renderer.draw_text(style.font, row.text, x + (row.kind == "file" and 8 * SCALE or 0), ry, color)
-    if row.kind == "file" and row.entry.status ~= "!" then
-      renderer.draw_rect(self.position.x + self.size.x - 28 * SCALE, ry, 28 * SCALE, lh(), style.background2)
-      renderer.draw_text(style.font, row.entry.staged and "-" or "+", self.position.x + self.size.x - 20 * SCALE, ry, style.accent)
+  local x, w, top = self.position.x, self.size.x, self.position.y + header_h()
+  common.draw_text(style.font, style.text, "SOURCE CONTROL", nil, x + style.padding.x, self.position.y, 0, header_h())
+  self.header = {row = {}}; self.header.row.buttons = {}
+  self:button(self.header.row, style.font, "…", x + w - style.padding.x, self.position.y, header_h(), function() command.perform("scm:actions") end)
+  core.push_clip_rect(x, top, w, self.size.y - header_h())
+  local origin = top - self.scroll.y
+  for _, row in ipairs(self.rows) do
+    local ry = origin + row.y
+    if ry > self.position.y + self.size.y then break end
+    if ry + row.h >= top then
+      if row.kind == "section" and row ~= self.rows[1] then renderer.draw_rect(x, ry, w, math.max(1, SCALE), style.divider) end
+      self:draw_row(row, x, ry, w)
     end
   end
-  if #git.repositories == 0 then renderer.draw_text(style.font, git.discovering and "Discovering repositories..." or "Use ... to add or clone a repository", x, start_y, style.dim) end
   core.pop_clip_rect(); self:draw_scrollbar()
+end
+function Sidebar:row_at(y)
+  local top = self.position.y + header_h()
+  if y < top then return end
+  local offset = y - top + self.scroll.y
+  for _, row in ipairs(self.rows) do if offset >= row.y and offset < row.y + row.h then return row end end
+end
+function Sidebar:on_mouse_moved(x, y, ...)
+  Sidebar.super.on_mouse_moved(self, x, y, ...)
+  local row = self:row_at(y)
+  if y < self.position.y + header_h() then row = self.header and self.header.row end
+  if row ~= self.hover_row or x ~= self.hover_x then self.hover_row, self.hover_x = row, x; core.redraw = true end
+end
+function Sidebar:on_mouse_left()
+  Sidebar.super.on_mouse_left(self); self.hover_row, self.hover_x = nil, nil; core.redraw = true
 end
 function Sidebar:on_mouse_pressed(button, x, y, clicks)
   if Sidebar.super.on_mouse_pressed(self, button, x, y, clicks) then return true end
-  if y >= self.position.y + lh() and y < self.position.y + lh() * 2 then
-    for _, b in ipairs(self.buttons or {}) do if x >= b.x and x < b.x + b.w then command.perform(b.cmd); return true end end
-  end
-  local row = self.rows[math.floor((y - self.position.y - lh() * 3 + self.scroll.y) / lh()) + 1]
-  if row then
-    selected_repo, selected_file = row.repo, row.entry; core.redraw = true
-    if row.entry then
-      if x > self.position.x + self.size.x - 28 * SCALE and row.entry.status ~= "!" then
-        if row.entry.staged then unstage(row.repo, row.entry) else stage(row.repo, row.entry) end
-      elseif clicks > 1 then core.root_view:open_doc(core.open_doc(row.repo.root .. PATHSEP .. row.entry.path))
-      elseif button == "right" then command.perform("scm:file-actions")
-      else diff(row.repo, row.entry) end
-    end
-  end
+  local row = y < self.position.y + header_h() and self.header and self.header.row or self:row_at(y)
+  if not row then return true end
+  for _, b in ipairs(row.buttons or {}) do if x >= b.x1 and x < b.x2 then b.fn(); return true end end
+  if row.kind == "section" or row.kind == "group" then collapsed[row.key] = not collapsed[row.key]; self.generation = -1
+  elseif row.kind == "repo" then selected_repo, selected_file = row.repo, nil; if row.repo.dirty or not row.repo.status.head then git.refresh(row.repo) end
+  elseif row.kind == "file" then
+    selected_repo, selected_file = row.repo, row.entry
+    if clicks > 1 then core.root_view:open_doc(core.open_doc(row.repo.root .. PATHSEP .. row.entry.path))
+    elseif button == "right" then command.perform("scm:file-actions")
+    else diff(row.repo, row.entry) end
+  elseif row.kind == "graph" then inspect(row.repo, row.commit)
+  elseif row.kind == "more" then history(row.repo) end
+  core.redraw = true
   return true
 end
+-- Background sync: runs from startup, not only while the panel is open.
+-- Every second it checks each repository's .git files for changes made by
+-- any tool; status is also refreshed on an interval and on window focus,
+-- and remotes are fetched quietly so incoming/outgoing counts stay current.
+core.add_thread(function()
+  coroutine.yield(1)
+  git.discover()
+  local index, focused = 0, false
+  while true do
+    local has_focus = system.window_has_focus(core.window)
+    if has_focus and not focused then for _, repo in ipairs(git.repositories) do repo.dirty = true end end
+    focused = has_focus
+    local now, active = system.get_time(), current()
+    for _, repo in ipairs(git.repositories) do
+      local signature = git.signature(repo)
+      if repo.signature and signature ~= repo.signature then repo.dirty = true end
+      repo.signature = signature
+    end
+    if active and not active.worker and (active.dirty or (has_focus and now - active.last_refresh > options.refresh_interval)) then git.refresh(active) end
+    if #git.repositories > 0 then
+      index = index % #git.repositories + 1
+      local repo = git.repositories[index]
+      if repo ~= active and not repo.worker and (repo.dirty or (has_focus and now - repo.last_refresh > math.max(15, options.refresh_interval * 3))) then git.refresh(repo) end
+    end
+    -- Start at most one fetch per tick: the stalest repository with an upstream.
+    local stalest
+    for _, repo in ipairs(options.fetch_interval > 0 and git.repositories or {}) do
+      if repo.status.upstream and not repo.fetching and (not stalest or (repo.last_fetch or 0) < (stalest.last_fetch or 0)) then stalest = repo end
+    end
+    if stalest and now - (stalest.last_fetch or 0) > options.fetch_interval then git.fetch(stalest) end
+    coroutine.yield(1)
+  end
+end)
 local function ensure_panel()
   if panel then return panel end
   panel = Sidebar(); set_visible(panel, true); panel.node = core.root_view:get_primary_node():split("left", panel, {x = true}, true)
-  local ToolbarView = require "plugins.toolbarview"
-  panel.toolbar = ToolbarView()
-  panel.node:split("down", panel.toolbar, {y = true})
-  core.add_thread(function()
-    git.discover()
-    local index = 0
-    while panel do
-      if panel.visible and system.window_has_focus(core.window) and #git.repositories > 0 then
-        local active = current()
-        if active and not active.worker and (active.dirty or system.get_time() - active.last_refresh > options.refresh_interval) then git.refresh(active) end
-        index = index % #git.repositories + 1
-        local repo = git.repositories[index]
-        if repo ~= active and not repo.worker and (repo.dirty or system.get_time() - repo.last_refresh > math.max(15, options.refresh_interval * 3)) then git.refresh(repo) end
-      end
-      coroutine.yield(1)
-    end
-  end)
   return panel
 end
 local commands = {
@@ -271,16 +464,19 @@ local commands = {
     core.add_thread(function() local out, err = git.git(path, {"init"}); if out then local repo = git.add(path); if repo then selected_repo = repo; git.refresh(repo) end else core.error("%s", err) end end)
   end, core.root_project().path) end,
   ["scm:history"] = function() with_repo(history) end,
-  ["scm:stage-all"] = function() with_repo(function(repo) operation(repo, "Stage all", {"add", "--all", "--", "."}) end) end,
-  ["scm:unstage-all"] = function() with_repo(function(repo)
-    if repo.status.head == "(initial)" then operation(repo, "Unstage all", {"rm", "--cached", "-r", "--", "."})
-    else operation(repo, "Unstage all", {"restore", "--staged", "--", "."}) end
-  end) end,
+  ["scm:stage-all"] = function() with_repo(stage_all) end,
+  ["scm:unstage-all"] = function() with_repo(unstage_all) end,
   ["scm:commit"] = function() with_repo(function(repo)
     if #repo.status.conflicts > 0 then core.error("Resolve and stage conflicts before committing"); return end
     prompt("Commit message", function(message)
       repo.message = message
-      if message:match("%S") then operation(repo, "Commit", {"commit", "-F", "-"}, message .. "\n", function() repo.message = "" end) end
+      if not message:match("%S") then return end
+      -- Nothing staged: commit every change, like the "Commit All" button says.
+      local all = #repo.status.staged == 0
+      git.enqueue(repo, "Commit", function()
+        if all then local out, err = git.git(repo, {"add", "--all", "--", "."}); if not out then return nil, err end end
+        return git.git(repo, {"commit", "-F", "-"}, message .. "\n")
+      end, function(out) git.refresh(repo); if out then repo.message = "" end end)
     end, repo.message)
   end) end,
   ["scm:amend"] = function() with_repo(function(repo)
@@ -426,7 +622,7 @@ keymap.add({["ctrl+shift+g"] = "scm:toggle"})
 local old_add = core.add_project
 function core.add_project(...)
   local project = old_add(...)
-  if panel then core.add_thread(function() git.discover(); for _, repo in ipairs(git.repositories) do if repo.dirty then git.refresh(repo) end end end) end
+  core.add_thread(function() git.discover() end)
   return project
 end
 local Doc = require "core.doc"
@@ -436,4 +632,5 @@ function Doc:save(...)
   for _, repo in ipairs(git.repositories) do if self.abs_filename and common.path_belongs_to(self.abs_filename, repo.root) then repo.dirty = true end end
   return result
 end
-return {git = git, open = ensure_panel}
+return {git = git, open = ensure_panel, panel = function() return panel end,
+  change_count = function() local n = 0; for _, repo in ipairs(git.repositories) do n = n + change_count(repo) end; return n end}

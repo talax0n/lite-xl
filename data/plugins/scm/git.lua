@@ -114,23 +114,24 @@ function M.discover()
   M.discovering = false
   if not ok then core.error("Repository discovery: %s", tostring(err)) end
 end
-function M.enqueue(repo, label, operation, done)
-  repo.queue[#repo.queue + 1] = {label = label, operation = operation, done = done}
+-- Quiet tasks (background fetch) neither show as busy nor report errors.
+function M.enqueue(repo, label, operation, done, quiet)
+  repo.queue[#repo.queue + 1] = {label = label, operation = operation, done = done, quiet = quiet}
   if repo.worker then return end
   repo.worker = true
   core.add_thread(function()
     while #repo.queue > 0 do
       local task = table.remove(repo.queue, 1)
-      repo.busy = task.label; M.generation = M.generation + 1; core.redraw = true
+      repo.busy = not task.quiet and task.label or nil; M.generation = M.generation + 1; core.redraw = true
       local ok, result, err = pcall(task.operation)
       if not ok then err, result = result, nil end
-      repo.error = result == nil and err or nil
+      if not task.quiet then repo.error = result == nil and err or nil end
       repo.dirty = true
       if task.done then
         local callback_ok, callback_err = pcall(task.done, result, err)
         if not callback_ok then core.error("%s: %s", task.label, tostring(callback_err)) end
       end
-      if result == nil then core.error("%s: %s", task.label, err or "Operation failed") end
+      if result == nil and not task.quiet then core.error("%s: %s", task.label, err or "Operation failed") end
       repo.busy = nil; M.generation = M.generation + 1; core.redraw = true
     end
     repo.worker = false
@@ -145,6 +146,22 @@ function M.refresh(repo)
     repo.status = parse.status(out); repo.dirty = false; repo.last_refresh = system.get_time()
     return true
   end, function() repo.refresh_queued = false; repo.dirty = false; repo.last_refresh = system.get_time() end)
+end
+-- Cheap change detector: HEAD, index and reflog move on commit, stage,
+-- checkout, pull and push from any tool, including the terminal.
+function M.signature(repo)
+  local dir = repo.root .. PATHSEP .. ".git"
+  local parts = {}
+  for _, name in ipairs({"HEAD", "index", "logs" .. PATHSEP .. "HEAD", "FETCH_HEAD"}) do
+    local info = system.get_file_info(dir .. PATHSEP .. name)
+    parts[#parts + 1] = info and (info.modified .. ":" .. info.size) or "-"
+  end
+  return table.concat(parts, "|")
+end
+function M.fetch(repo)
+  repo.last_fetch, repo.fetching = system.get_time(), true
+  M.enqueue(repo, "Fetching", function() return M.git(repo, {"fetch", "--prune", "--quiet"}) end,
+    function() repo.fetching, repo.last_fetch = nil, system.get_time(); repo.graph_head = nil; M.refresh(repo) end, true)
 end
 function M.history(repo, done, reset)
   if reset then repo.history = {}; repo.history_done = false end

@@ -5,12 +5,17 @@ Both features are bundled with the editor. Open the command palette and type
 
 ## Source control
 
-Press **Ctrl+Shift+G** to toggle Source Control. The file explorer hides while
-this sidebar is open and returns when you close it.
+Press **Ctrl+Shift+G**, or click the branch icon in the activity bar at the far
+left, to toggle Source Control. The activity bar badge counts changed files
+across all repositories. The file explorer hides while this sidebar is open and
+returns when you close it.
 
-Each repository has its own branch, incoming/outgoing counts, staged changes,
-working changes, conflicts, commit draft, history, and operation queue. Click a
-repository heading to select the target for toolbar actions. Use **Select
+The sidebar has three collapsible sections. **Repositories** lists each
+repository with its branch (`*` when dirty) and incoming/outgoing counts (click to
+sync). Click a repository to select it. **Changes** shows the selected
+repository's commit message box, Commit button, and grouped changes. With
+nothing staged, the button reads **Commit All** and stages everything first.
+**Graph** shows recent commits with pull, push, and full-graph actions. Use **Select
 Repository** when several repositories are open. **Add Repository** accepts any
 local checkout, including a worktree. Workspace folders and nested repositories are discovered automatically when
 Source Control opens. The scan visits siblings before deeper folders.
@@ -18,8 +23,16 @@ Source Control opens. The scan visits siblings before deeper folders.
 it defaults to three levels and 100 folders, skipping hidden directories,
 node_modules, vendor, and build. Add repositories manually beyond that limit.
 
-Click a changed file to review its colored unified diff. The `+` action stages
-it; `-` unstages it. Right-click a file for its actions. In a diff, click a hunk
+Source Control syncs in the background from startup, even while the panel is
+closed. Commits, staging, checkouts, pulls, and pushes from any tool, including
+the terminal, show up within about a second. Status also refreshes every
+`refresh_interval` seconds (5 by default) and whenever the window regains
+focus. Branches with an upstream are fetched quietly every `fetch_interval`
+seconds (180 by default; 0 disables it), so incoming/outgoing counts stay
+current.
+
+Click a changed file to review its colored unified diff. Hover a file to stage
+(`+`), unstage (`−`), or discard it; hover a group to stage or unstage all. Right-click a file for its actions. In a diff, click a hunk
 before choosing **Stage hunk** or **Unstage hunk**. Changes shown by Git are saved
 changes on disk; save your editor buffers before staging.
 

@@ -35,6 +35,13 @@ or to use without doing either.
 The aim of Lite XL compared to lite is to be more user friendly,
 improve the quality of font rendering, and reduce CPU usage.
 
+## Built-in development tools
+
+This checkout includes multi-repository Git source control, a commit graph,
+change previews, GitHub CLI actions, and a native integrated terminal.
+Use Ctrl+Shift+G for Source Control and Ctrl+` for the terminal.
+See [the feature guide](docs/ide-features.md) for usage, resource limits, and tests.
+
 ## Customization
 
 Additional functionality can be added through plugins which are available in

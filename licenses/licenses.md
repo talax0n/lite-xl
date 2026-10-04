@@ -128,3 +128,10 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+## libvterm
+
+The built-in terminal uses libvterm 0.3.3, copyright Paul Evans and contributors,
+under the MIT license. The complete notice is in `src/vendor/libvterm/LICENSE`.
+Source: https://www.leonerd.org.uk/code/libvterm/.

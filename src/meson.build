@@ -5,6 +5,7 @@ lite_sources = [
     'api/regex.c',
     'api/system.c',
     'api/process.c',
+    'api/terminal.c',
     'api/utf8.c',
     'arena_allocator.c',
     'custom_events.c',
@@ -119,6 +120,22 @@ elif host_machine.system() == 'darwin'
     lite_sources += 'bundle_open.m'
 endif
 
+vterm_sources = files(
+    'vendor/libvterm/src/encoding.c', 'vendor/libvterm/src/keyboard.c',
+    'vendor/libvterm/src/mouse.c', 'vendor/libvterm/src/parser.c',
+    'vendor/libvterm/src/pen.c', 'vendor/libvterm/src/screen.c',
+    'vendor/libvterm/src/state.c', 'vendor/libvterm/src/unicode.c',
+    'vendor/libvterm/src/vterm.c',
+)
+vterm_includes = include_directories('vendor/libvterm/include')
+vterm_lib = static_library('vterm', vterm_sources,
+    include_directories: vterm_includes, c_args: ['-std=c99'],
+)
+vterm_dep = declare_dependency(link_with: vterm_lib, include_directories: vterm_includes)
+lite_deps += vterm_dep
+if host_machine.system() != 'windows'
+    lite_deps += cc.find_library('util', required: false)
+endif
 lite_includes += include_directories('.')
 
 executable('lite-xl',
@@ -132,3 +149,16 @@ executable('lite-xl',
     install: true,
     win_subsystem: 'windows',
 )
+
+# Exercise the actual Git process API and PTY emulator on Unix hosts.
+if host_machine.system() != 'windows'
+    ide_tests = executable('ide-test-runner',
+        '../scripts/tests/native.c', 'api/terminal.c', 'api/process.c', 'arena_allocator.c',
+        include_directories: lite_includes, dependencies: lite_deps,
+        c_args: lite_cargs, link_args: lite_link_args, install: false,
+    )
+    test('source-control-and-terminal', ide_tests,
+        args: [meson.project_source_root() / 'scripts/tests/ide.lua'],
+        workdir: meson.project_source_root(), timeout: 120,
+    )
+endif

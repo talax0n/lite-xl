@@ -1041,7 +1041,7 @@ function core.run()
     if core.restart_request or core.quit_request then break end
 
     if not did_redraw then
-      if system.window_has_focus(core.window) or not did_step or run_threads_full < 2 then
+      if system.window_has_focus(core.window) or (core.background_tasks or 0) > 0 or not did_step or run_threads_full < 2 then
         local now = system.get_time()
         if not next_step then -- compute the time until the next blink
           local t = now - core.blink_start

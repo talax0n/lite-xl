@@ -156,6 +156,47 @@ function core.init(...)
     local dv = core.active_view
     assert(dv.doc and dv.doc.abs_filename:match('a%.lua$') and dv.doc:get_selection() == 3, 'Open at line failed')
     core.set_active_view(rv)
+    -- Own fixes: only files saved from TreX are committed.
+    dv.doc:insert(1, 1, '-- reviewed\n'); dv.doc:save()
+    write(root .. '/wip.txt', 'agent wip\n')
+    wait(function() return not rv.loading and #rv.fixes == 1 end, 'Saved fix not detected')
+    rv:commit_fixes('fix: address review')
+    wait(function() return scm.git.exec(root, 'git', {'log', '-1', '--format=%s'}) == 'fix: address review\n' end, 'Fix commit missing')
+    assert(scm.git.exec(root, 'git', {'show', '--name-only', '--format=', 'HEAD'}) == 'a.lua\n', 'Fix commit included other files')
+    os.remove(root .. '/wip.txt')
+    -- Push empties the review and archives the notes.
+    rv:finish('push', true)
+    wait(function() return not rv.loading and #rv.all_rows == 0 end, 'Push did not empty the review', 15)
+    local archived = false
+    for _, name in ipairs(system.list_dir(root .. '/.trex/reviews') or {}) do archived = archived or name:match('%.md$') ~= nil end
+    assert(archived and not read(root .. '/.trex/review.md'), 'Review not archived after push')
+    -- Agent worktree (folder with a space): merge into main, worktree removed.
+    local wt = workspace .. '/agent wt'
+    run(root, {'worktree', 'add', '-b', 'agent/x', wt})
+    write(wt .. '/c.lua', 'return 3\n'); commit(wt, 'agent work')
+    review.open(root)
+    wait(function() return rv.target.branch == 'agent/x' and not rv.loading and #rv.files == 1 end, 'Worktree target not opened')
+    local labels = {}
+    for _, a in ipairs(rv.actions) do labels[a.text] = true end
+    assert(rv.target.base == 'main' and labels['Merge into main'] and labels['Push branch'] and labels['Discard'], 'Worktree actions missing')
+    rv:finish('merge', true)
+    wait(function() return read(root .. '/c.lua') == 'return 3\n' and not system.get_file_info(wt) end, 'Merge did not land or worktree not removed', 15)
+    assert(not scm.git.exec(root, 'git', {'branch', '--list', 'agent/x'}):find('agent', 1, true), 'Merged branch not deleted')
+    -- Discard an unmerged worktree; a locked one offers no Discard.
+    local wy, wz = workspace .. '/wt-y', workspace .. '/wt-z'
+    run(root, {'worktree', 'add', '-b', 'agent/y', wy}); write(wy .. '/d.lua', 'return 4\n'); commit(wy, 'y work')
+    run(root, {'worktree', 'add', '-b', 'agent/z', wz}); write(wz .. '/e.lua', 'return 5\n'); commit(wz, 'z work')
+    run(root, {'worktree', 'lock', wz})
+    local list = assert(require('plugins.scm.review_ops').targets(root))
+    for _, t in ipairs(list) do if t.branch == 'agent/z' then rv:retarget(t) end end
+    wait(function() return not rv.loading and rv.target.branch == 'agent/z' end, 'Locked worktree not opened')
+    for _, a in ipairs(rv.actions) do assert(a.text ~= 'Discard', 'Locked worktree offers Discard') end
+    for _, t in ipairs(list) do if t.branch == 'agent/y' then rv:retarget(t) end end
+    wait(function() return not rv.loading and rv.target.branch == 'agent/y' end, 'Worktree y not opened')
+    rv:discard(true)
+    wait(function() return not system.get_file_info(wy) end, 'Discard did not remove worktree', 15)
+    assert(not scm.git.exec(root, 'git', {'branch', '--list', 'agent/y'}):find('agent', 1, true), 'Discarded branch not deleted')
+    run(root, {'worktree', 'unlock', wz})
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
     print('PASS: nested workspace repositories, activity bar, source control sections, backlog, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)

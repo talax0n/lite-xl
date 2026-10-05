@@ -178,6 +178,16 @@ function Review:update_actions()
   a[#a + 1] = {text = self.mode == "all" and "All changes" or self.mode:sub(1, 8), fn = function() self:pick_commit() end}
   a[#a + 1] = {text = "Note", fn = function() self:general_note() end}
   a[#a + 1] = {text = "Copy notes", fn = function() self:copy_notes() end}
+  if #self.all_rows > 0 and t.branch and not self.state.busy then
+    local done = self:complete()
+    if t.main then
+      a[#a + 1] = {text = "Push", primary = done, fn = function() self:finish("push") end}
+    else
+      a[#a + 1] = {text = "Merge into " .. t.base, primary = done, fn = function() self:finish("merge") end}
+      a[#a + 1] = {text = "Push branch", fn = function() self:finish("push") end}
+    end
+  end
+  if not t.main and not t.locked then a[#a + 1] = {text = "Discard", fn = function() self:discard() end} end
   self.actions = a
 end
 
@@ -324,6 +334,90 @@ function Review:open_at(row)
   local line = anchor and anchor.new or 1
   doc:set_selection(line, 1)
   dv:scroll_to_line(line, true, true)
+end
+
+function Review:commit_fixes(message)
+  local function run(msg)
+    if msg:match("^%s*$") then return end
+    core.add_thread(function()
+      local ok, err = ops.commit_fixes(self.target, self.fixes, msg)
+      if not ok then core.error("Commit fixes: %s", err); return end
+      M.saved[self.target.root] = {}
+      local repo = git.by_root[self.target.root]
+      if repo then git.refresh(repo) end
+      self:reload()
+    end)
+  end
+  if message then run(message) else views.prompt("Commit message", run, "fix: address review") end
+end
+
+function Review:show_uncommitted()
+  core.add_thread(function()
+    local out, err = git.git(self.target.root, {"diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"})
+    if not out then core.error("Review: %s", err); return end
+    views.open(views.Text("Uncommitted: " .. (self.target.branch or "HEAD"), out ~= "" and out or "Only untracked files. Open the worktree to see them."))
+  end)
+end
+
+-- After a worktree is merged or discarded: next target with work, else the main checkout.
+function Review:next_target()
+  local list = ops.targets(self.target.main_root) or {}
+  local t = M.candidates(list)[1] or list[1]
+  if t then self:retarget(t) end
+end
+
+function Review:finish(kind, yes)
+  local t = self.target
+  local unviewed = 0
+  for _, f in ipairs(self.files) do if not self:is_viewed(f.path) then unviewed = unviewed + 1 end end
+  local warn = {}
+  if unviewed > 0 or self:open_notes() > 0 then warn[#warn + 1] = string.format("%d files unviewed, %d open notes.", unviewed, self:open_notes()) end
+  if self.dirty > 0 then warn[#warn + 1] = string.format("%d uncommitted files are not included.", self.dirty) end
+  local verb = kind == "merge" and "Merge" or "Push"
+  local function run()
+    core.add_thread(function()
+      local ok, err, conflict
+      if kind == "merge" then ok, err, conflict = ops.merge(t) else ok, err = ops.push(t) end
+      local repo = git.by_root[t.main_root]
+      if repo then git.refresh(repo) end
+      if not ok then
+        core.error("%s: %s", verb, err or "failed")
+        if conflict then require("plugins.scm").open() end
+        return
+      end
+      if kind == "push" then
+        if t.main then ops.archive(t); self:reload() end
+        core.log("Pushed %s", t.branch)
+        return
+      end
+      local function remove()
+        core.add_thread(function()
+          local removed, rerr = ops.remove(t, false)
+          if not removed then core.error("Remove worktree: %s", rerr); return end
+          self:next_target()
+        end)
+      end
+      if yes then remove()
+      else views.confirm("Merged " .. t.branch, "Remove worktree " .. t.root .. " and delete branch " .. t.branch .. "?", remove) end
+    end)
+  end
+  if #warn > 0 and not yes then views.confirm(verb .. " anyway?", table.concat(warn, " ") .. " " .. verb .. " anyway?", run)
+  else run() end
+end
+
+function Review:discard(yes)
+  local t = self.target
+  local function run()
+    core.add_thread(function()
+      local ok, err = ops.remove(t, true)
+      if not ok then core.error("Discard: %s", err); return end
+      core.log("Discarded %s", t.branch or t.root)
+      self:next_target()
+    end)
+  end
+  if yes then return run() end
+  views.confirm("Discard worktree", string.format("Delete worktree %s and branch %s with %d unmerged commit%s? This cannot be undone.",
+    t.root, t.branch or "(detached)", #self.commits, #self.commits == 1 and "" or "s"), run)
 end
 
 -- ponytail: the diff renderer is reused by narrowing the view rect around

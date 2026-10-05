@@ -14,6 +14,7 @@ bundle="$stage/TreX.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp "$stage/install/lite-xl" "$bundle/Contents/MacOS/lite-xl"
 cp -R "$stage/install/data" "$bundle/Contents/Resources/data"
+cp "$(dirname "$0")/../resources/icons/icon.icns" "$bundle/Contents/Resources/icon.icns"
 ln -s ../Resources/data "$bundle/Contents/MacOS/data"
 cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -22,6 +23,7 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>lite-xl</string>
 <key>CFBundleIdentifier</key><string>com.trex.editor</string>
 <key>CFBundleName</key><string>TreX</string>
+<key>CFBundleIconFile</key><string>icon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>NSHighResolutionCapable</key><true/>

@@ -1,0 +1,423 @@
+-- Commit review: walk unpushed commits (main checkout) or an agent worktree
+-- branch file by file, mark files viewed, leave line notes in .trex/review.md
+-- for the agent, commit own fixes, then push, merge or discard.
+local core = require "core"
+local common = require "core.common"
+local command = require "core.command"
+local keymap = require "core.keymap"
+local style = require "core.style"
+local View = require "core.view"
+local Doc = require "core.doc"
+local DocView = require "core.docview"
+local git = require "plugins.scm.git"
+local views = require "plugins.scm.views"
+local notes = require "plugins.scm.review_notes"
+local ops = require "plugins.scm.review_ops"
+
+local Review = views.Text:extend()
+Review.persistent = true -- opening a diff must not close the review tab
+local M = {Review = Review, saved = {}, save_tick = 0}
+
+local function tint(c, a) return {c[1], c[2], c[3], a} end
+local function pane_lh() return style.font:get_height() + style.padding.y end
+local function saved_list(root)
+  local list = {}
+  for path in pairs(M.saved[root] or {}) do list[#list + 1] = path end
+  table.sort(list)
+  return list
+end
+
+function Review:new(target)
+  Review.super.new(self, "Review", "")
+  self.target, self.mode, self.commits, self.fixes, self.dirty, self.state = target, "all", {}, {}, 0, {}
+  self.doc, self.viewed, self.blobs, self.all_rows = {notes = {}, extra = {}}, {}, {}, {}
+  self:reload()
+end
+function Review:get_name() return "Review: " .. (self.target.branch or self.target.root:match("[^/]+$")) end
+
+function Review:reload()
+  if self.loading then self.reload_again = true; return end
+  self.loading = true
+  core.add_thread(function()
+    local ok, err = pcall(self.load, self)
+    self.loading = false
+    if not ok then core.error("Review: %s", tostring(err)) end
+    if self.reload_again then self.reload_again = false; self:reload() end
+    core.redraw = true
+  end)
+end
+
+function Review:load()
+  local t = self.target
+  self.state = ops.state(t)
+  local text, err = "", nil
+  if t.base then
+    if self.mode == "all" then text, err = ops.diff(t) else text, err = ops.show(t, self.mode) end
+    if not text then core.error("Review: %s", err or "git failed") end
+  end
+  self.commits = t.base and ops.commits(t) or {}
+  self.dirty = ops.dirty_count(t)
+  self.fixes = ops.dirty_paths(t, saved_list(t.root))
+  local doc, viewed = ops.load(t)
+  local keep = self:current_file()
+  keep = keep and keep.path
+  self:set_text(text or "")
+  self.all_rows = self.rows
+  local paths = {}
+  for _, f in ipairs(self.files) do paths[#paths + 1] = f.path end
+  self.blobs = #paths > 0 and ops.blobs(t, paths) or {}
+  local heads, moved = {}, false
+  for _, n in ipairs(doc.notes) do
+    if n.path then
+      if heads[n.path] == nil then heads[n.path] = ops.head_lines(t, n.path) or false end
+      local from = n.from
+      notes.reanchor(n, heads[n.path] or nil)
+      moved = moved or n.from ~= from
+    end
+  end
+  self.doc, self.viewed = doc, viewed
+  if moved then ops.save(t, doc) end
+  self:build()
+  self:update_actions()
+  for _, f in ipairs(self.files) do
+    if f.path == keep then self.scroll.y, self.scroll.to.y = f.row.y, f.row.y end
+  end
+  self.sig = self:signature()
+end
+
+-- Cheap change detector for the target: commits, index, notes file and saves from TreX.
+function Review:signature()
+  local parts, gitdir = {M.save_tick}, self.state.gitdir or ""
+  for _, path in ipairs({gitdir .. "/HEAD", gitdir .. "/index", gitdir .. "/logs/HEAD", self.target.root .. "/.trex/review.md"}) do
+    local info = system.get_file_info(path)
+    parts[#parts + 1] = info and (info.modified .. ":" .. info.size) or "-"
+  end
+  return table.concat(parts, "|")
+end
+
+function Review:update()
+  Review.super.update(self)
+  local now = system.get_time()
+  if self.sig and not self.loading and now - (self.checked or 0) > 1 then
+    self.checked = now
+    if self:signature() ~= self.sig then self:reload() end
+  end
+end
+
+function Review:is_viewed(path) return self.viewed[path] ~= nil and self.viewed[path] == self.blobs[path] end
+function Review:open_notes(path)
+  local count = 0
+  for _, n in ipairs(self.doc.notes) do if not n.done and (path == nil or n.path == path) then count = count + 1 end end
+  return count
+end
+function Review:complete()
+  for _, f in ipairs(self.files) do if not self:is_viewed(f.path) then return false end end
+  return self:open_notes() == 0
+end
+function Review:current_file()
+  local cur
+  for _, f in ipairs(self.files or {}) do if f.row and f.row.y and f.row.y <= self.scroll.y + 1 then cur = f end end
+  return cur or (self.files and self.files[1])
+end
+
+-- Visible rows from the parsed diff: banners, collapsed viewed files, and
+-- note rows under the line they point at.
+function Review:build()
+  local rows, t = {}, self.target
+  local function add(row) rows[#rows + 1] = row end
+  if self.state.busy then add({kind = "banner", color = style.warn, text = "A " .. self.state.busy .. " is in progress: finish it before pushing or merging"}) end
+  if not t.branch then add({kind = "banner", color = style.warn, text = "Detached HEAD: check out a branch to push or merge"}) end
+  if #self.fixes > 0 then
+    add({kind = "banner", text = "Uncommitted fixes: " .. #self.fixes .. (#self.fixes == 1 and " file" or " files"), button = "Commit fixes", fn = function() self:commit_fixes() end})
+  end
+  if self.dirty > #self.fixes then
+    add({kind = "banner", color = style.warn, text = "Agent left uncommitted changes: " .. (self.dirty - #self.fixes) .. " files (not part of this review)", button = "Show", fn = function() self:show_uncommitted() end})
+  end
+  if #self.all_rows == 0 then
+    add({kind = "banner", color = style.dim, text = t.base and ("Nothing to review: " .. (t.branch or "HEAD") .. " has no commits ahead of " .. t.base) or "No base branch: pick one from the target menu"})
+  end
+  local by_path, lines_in, file = {}, {}, nil
+  for _, n in ipairs(self.doc.notes) do
+    if n.path then by_path[n.path] = by_path[n.path] or {}; table.insert(by_path[n.path], n)
+    else add({kind = "rnote", note = n}) end
+  end
+  for _, row in ipairs(self.all_rows) do
+    if row.kind == "file" then file = row.file; lines_in[file.path] = lines_in[file.path] or {}
+    elseif file and row.new then lines_in[file.path][row.new] = true end
+  end
+  local placed = {}
+  file = nil
+  for _, row in ipairs(self.all_rows) do
+    if row.kind == "file" then
+      file = row.file
+      add(row)
+      -- Notes outside the diff hunks (or in single-commit mode) sit under the file header.
+      for _, n in ipairs(by_path[file.path] or {}) do
+        if self.mode ~= "all" or n.outdated or not lines_in[file.path][n.to] then add({kind = "rnote", note = n}); placed[n] = true end
+      end
+    elseif not (file and self:is_viewed(file.path)) then
+      add(row)
+      if file and row.new and self.mode == "all" then
+        for _, n in ipairs(by_path[file.path] or {}) do
+          if not placed[n] and n.to == row.new then add({kind = "rnote", note = n}); placed[n] = true end
+        end
+      end
+    end
+  end
+  for _, n in ipairs(self.doc.notes) do
+    if n.path and not placed[n] and not lines_in[n.path] then add({kind = "rnote", note = n}) end
+  end
+  self.rows = rows
+  self:layout()
+  core.redraw = true
+end
+
+function Review:update_actions()
+  local t, a = self.target, {}
+  a[#a + 1] = {text = (t.branch or "detached") .. " vs " .. (t.base or "?"), fn = function() self:pick_target() end}
+  a[#a + 1] = {text = self.mode == "all" and "All changes" or self.mode:sub(1, 8), fn = function() self:pick_commit() end}
+  self.actions = a
+end
+
+function Review:persist(doc_changed, viewed_changed)
+  core.add_thread(function()
+    local ok, err = ops.save(self.target, doc_changed and self.doc or nil, viewed_changed and self.viewed or nil)
+    if not ok then core.error("Review: %s", err) end
+    self.sig = self:signature()
+  end)
+end
+
+function Review:toggle_viewed(path, value)
+  if value == nil then value = not self:is_viewed(path) end
+  self.viewed[path] = value and self.blobs[path] or nil
+  self:build(); self:update_actions(); self:persist(false, true)
+end
+
+function Review:viewed_next()
+  local cur = self:current_file()
+  if not cur then return end
+  self:toggle_viewed(cur.path, true)
+  local after = false
+  for _, f in ipairs(self.files) do
+    if after and not self:is_viewed(f.path) then self.scroll.to.y = f.row.y; return end
+    after = after or f == cur
+  end
+  for _, f in ipairs(self.files) do if not self:is_viewed(f.path) then self.scroll.to.y = f.row.y; return end end
+end
+
+function Review:retarget(t)
+  M.saved[t.root] = M.saved[t.root] or {}
+  self.target, self.mode, self.sel_from, self.sel_to = t, "all", nil, nil
+  self.scroll.y, self.scroll.to.y = 0, 0
+  self:reload()
+end
+
+function Review:pick_commit()
+  local labels, by = {"All changes"}, {["All changes"] = "all"}
+  for _, c in ipairs(self.commits) do
+    local label = c.hash:sub(1, 8) .. "  " .. c.subject
+    labels[#labels + 1] = label; by[label] = c.hash
+  end
+  views.prompt("Show", function(label) if by[label] then self.mode = by[label]; self:reload() end end, "", labels)
+end
+
+function Review:pick_target()
+  core.add_thread(function()
+    local list, err = ops.targets(self.target.main_root)
+    if not list then core.error("Review: %s", err); return end
+    local labels, by = {}, {}
+    for _, t in ipairs(list) do local label = M.label(t); labels[#labels + 1] = label; by[label] = t end
+    local change = "Change base (" .. (self.target.base or "none") .. ")..."
+    labels[#labels + 1] = change
+    views.prompt("Review target", function(label)
+      if label == change then
+        views.prompt("Base ref", function(ref) if ref ~= "" then self.target.base = ref; self:reload() end end, self.target.base or "")
+      elseif by[label] then self:retarget(by[label]) end
+    end, "", labels)
+  end)
+end
+
+-- ponytail: the diff renderer is reused by narrowing the view rect around
+-- Text calls; switch to a split container if the review grows more panes.
+local function in_diff(self, fn, ...)
+  local pw = self:pane_w()
+  self.position.x, self.size.x = self.position.x + pw, self.size.x - pw
+  local result = table.pack(pcall(fn, self, ...))
+  self.position.x, self.size.x = self.position.x - pw, self.size.x + pw
+  if not result[1] then error(result[2], 0) end
+  return table.unpack(result, 2, result.n)
+end
+
+function Review:pane_w() return math.floor(240 * SCALE) end
+
+function Review:draw()
+  in_diff(self, views.Text.draw)
+  self:draw_pane()
+end
+
+function Review:draw_pane()
+  local x, y, w, h = self.position.x, self.position.y, self:pane_w(), self.size.y
+  local tb, lh, px = self:toolbar_height(), pane_lh(), style.padding.x
+  local line = math.max(1, math.floor(SCALE))
+  renderer.draw_rect(x, y, w, h, style.background2)
+  renderer.draw_rect(x + w - line, y, line, h, style.divider)
+  local done = 0
+  for _, f in ipairs(self.files) do if self:is_viewed(f.path) then done = done + 1 end end
+  local open = self:open_notes()
+  common.draw_text(style.font, (done == #self.files and #self.files > 0) and style.good or style.text,
+    string.format("%d/%d reviewed  ·  %d note%s", done, #self.files, open, open == 1 and "" or "s"), nil, x + px, y, 0, tb)
+  renderer.draw_rect(x, y + tb - line, w, line, style.divider)
+  core.push_clip_rect(x, y + tb, w, h - tb)
+  local box, current = math.floor(10 * SCALE), self:current_file()
+  for i, f in ipairs(self.files) do
+    local ry = y + tb + (i - 1) * lh - (self.pane_scroll or 0)
+    if ry + lh >= y + tb and ry <= y + h then
+      if f == current then renderer.draw_rect(x, ry, w, lh, style.selection)
+      elseif self:hovered(x, ry, w, lh) then renderer.draw_rect(x, ry, w, lh, style.line_highlight) end
+      local bx, by = x + px, ry + (lh - box) / 2
+      local viewed = self:is_viewed(f.path)
+      if viewed then renderer.draw_rect(bx, by, box, box, style.good)
+      else
+        renderer.draw_rect(bx, by, box, line, style.dim); renderer.draw_rect(bx, by + box - line, box, line, style.dim)
+        renderer.draw_rect(bx, by, line, box, style.dim); renderer.draw_rect(bx + box - line, by, line, box, style.dim)
+      end
+      local stat = "+" .. f.adds .. " −" .. f.dels
+      local right = x + w - px - style.font:get_width(stat)
+      common.draw_text(style.font, style.dim, stat, nil, right, ry, 0, lh)
+      if self:open_notes(f.path) > 0 then
+        local d = math.floor(6 * SCALE)
+        right = right - d - px / 2
+        renderer.draw_rect(right, ry + (lh - d) / 2, d, d, style.accent)
+      end
+      local nx = bx + box + px / 2
+      core.push_clip_rect(nx, ry, math.max(0, right - nx - px / 2), lh)
+      common.draw_text(style.font, viewed and style.dim or style.text, f.path:match("[^/]+$") or f.path, nil, nx, ry, 0, lh)
+      core.pop_clip_rect()
+    end
+  end
+  core.pop_clip_rect()
+end
+
+function Review:row_button(row, label, right, y, h, fn)
+  local bw = style.font:get_width(label) + style.padding.x
+  local bx = right - bw
+  local hovered = self:hovered(bx, y, bw, h)
+  renderer.draw_rect(bx, y + math.floor(2 * SCALE), bw, h - math.floor(4 * SCALE), hovered and style.selection or style.background3)
+  common.draw_text(style.font, hovered and style.accent or style.text, label, "center", bx, y, bw, h)
+  row.buttons[#row.buttons + 1] = {x1 = bx, x2 = bx + bw, fn = fn}
+  return bx
+end
+
+function Review:draw_row(row, x, y, w)
+  local px, h = style.padding.x, row.h
+  row.buttons = {}
+  if row.kind == "banner" then
+    renderer.draw_rect(x, y, w, h, style.background2)
+    common.draw_text(style.font, row.color or style.text, row.text, nil, x + px, y, 0, h)
+    if row.button then self:row_button(row, row.button, x + w - px, y, h, row.fn) end
+  else
+    views.Text.draw_row(self, row, x, y, w)
+  end
+end
+
+function Review:on_mouse_pressed(button, x, y, clicks)
+  if x < self.position.x + self:pane_w() then return self:pane_pressed(x, y) end
+  if in_diff(self, View.on_mouse_pressed, button, x, y, clicks) then return true end
+  local tb = self:toolbar_height()
+  if y >= self.position.y + tb then
+    local row = self.rows[self:row_at(y - self.position.y - tb + self.scroll.y)]
+    for _, b in ipairs(row and row.buttons or {}) do
+      if x >= b.x1 and x < b.x2 then b.fn(); return true end
+    end
+  end
+  return in_diff(self, views.Text.on_mouse_pressed, button, x, y, clicks)
+end
+
+function Review:pane_pressed(x, y)
+  local tb = self:toolbar_height()
+  if y < self.position.y + tb then return true end
+  local f = self.files[math.floor((y - self.position.y - tb + (self.pane_scroll or 0)) / pane_lh()) + 1]
+  if not f then return true end
+  if x < self.position.x + style.padding.x * 1.5 + math.floor(10 * SCALE) then self:toggle_viewed(f.path)
+  else self.scroll.to.y = f.row.y end
+  core.redraw = true
+  return true
+end
+
+function Review:on_mouse_moved(x, y, ...) return in_diff(self, views.Text.on_mouse_moved, x, y, ...) end
+function Review:on_mouse_released(...) return in_diff(self, View.on_mouse_released, ...) end
+function Review:on_mouse_wheel(dy, dx)
+  if self.mouse_x and self.mouse_x < self.position.x + self:pane_w() then
+    local max = math.max(0, #self.files * pane_lh() - (self.size.y - self:toolbar_height()))
+    self.pane_scroll = common.clamp((self.pane_scroll or 0) - dy * pane_lh() * 3, 0, max)
+    core.redraw = true
+    return true
+  end
+  return views.Text.on_mouse_wheel(self, dy, dx)
+end
+
+function M.label(t)
+  return string.format("%s  ·  %d commit%s%s  ·  %s", t.branch or "detached", t.ahead, t.ahead == 1 and "" or "s",
+    t.dirty > 0 and "  ·  dirty" or "", t.root)
+end
+
+function M.candidates(list)
+  local out = {}
+  for _, t in ipairs(list) do if t.ahead > 0 or (not t.main and t.dirty > 0) then out[#out + 1] = t end end
+  return out
+end
+
+-- One review tab: an open one is retargeted instead of opening another.
+function M.show(t)
+  M.saved[t.root] = M.saved[t.root] or {}
+  for _, v in ipairs(core.root_view.root_node:get_children()) do
+    if v:is(Review) then
+      v:retarget(t)
+      core.root_view.root_node:get_node_for_view(v):set_active_view(v)
+      return v
+    end
+  end
+  return views.open(Review(t))
+end
+
+-- Reviews `root`'s main checkout or one of its worktrees.
+function M.open(root)
+  core.add_thread(function()
+    local list, err = ops.targets(root)
+    if not list then core.error("Review: %s", err); return end
+    local c = M.candidates(list)
+    if #c == 0 then
+      local main = list[1]
+      if main and not main.base then
+        views.prompt("No upstream. Review against base ref", function(ref)
+          if ref ~= "" then main.base = ref; M.show(main) end
+        end, "main")
+      else
+        core.log("Nothing to review: no unpushed commits or agent worktrees")
+      end
+      return
+    end
+    if #c == 1 then M.show(c[1]); return end
+    local labels, by = {}, {}
+    for _, t in ipairs(c) do local label = M.label(t); labels[#labels + 1] = label; by[label] = t end
+    views.prompt("Review", function(label) if by[label] then M.show(by[label]) end end, "", labels)
+  end)
+end
+
+-- Files saved from TreX while a review is open count as own fixes.
+local doc_save = Doc.save
+function Doc:save(...)
+  local result = doc_save(self, ...)
+  local path = self.abs_filename
+  for root, set in pairs(M.saved) do
+    if path and common.path_belongs_to(path, root) then set[path:sub(#root + 2)] = true; M.save_tick = M.save_tick + 1 end
+  end
+  return result
+end
+
+command.add(Review, {
+  ["review:viewed-and-next"] = function(v) v:viewed_next() end,
+})
+keymap.add({v = "review:viewed-and-next"})
+
+return M

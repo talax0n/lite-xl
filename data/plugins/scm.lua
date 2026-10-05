@@ -8,6 +8,7 @@ local style = require "core.style"
 local View = require "core.view"
 local git = require "plugins.scm.git"
 local views = require "plugins.scm.views"
+local review = require "plugins.scm.review"
 
 config.plugins.scm = common.merge({width = 320, refresh_interval = 5, fetch_interval = 180, discovery_depth = 3, discovery_limit = 100}, config.plugins.scm)
 local options = config.plugins.scm
@@ -169,6 +170,9 @@ function Sidebar:rebuild()
     if not collapsed.changes then
       add({kind = "message", repo = repo, h = math.floor(lh() * 1.6)})
       add({kind = "commit", repo = repo, h = math.floor(lh() * 1.7)})
+      if (status.ahead or 0) > 0 then
+        add({kind = "more", repo = repo, action = "scm:review", text = "Review " .. status.ahead .. " unpushed commit" .. (status.ahead == 1 and "" or "s")})
+      end
       if status.limited then add({kind = "note", color = style.error, text = "Preview limited to 10,000 files. Use terminal for more."}) end
       if repo.busy then add({kind = "note", text = repo.busy .. "..."}) end
       if repo.error then add({kind = "note", color = style.error, text = repo.error:match("[^\r\n]+") or repo.error}) end
@@ -384,7 +388,7 @@ function Sidebar:on_mouse_pressed(button, x, y, clicks)
     elseif button == "right" then command.perform("scm:file-actions")
     else diff(row.repo, row.entry) end
   elseif row.kind == "graph" then inspect(row.repo, row.commit)
-  elseif row.kind == "more" then history(row.repo) end
+  elseif row.kind == "more" then if row.action then command.perform(row.action) else history(row.repo) end end
   core.redraw = true
   return true
 end
@@ -460,6 +464,7 @@ local commands = {
     core.add_thread(function() local out, err = git.git(path, {"init"}); if out then local repo = git.add(path); if repo then selected_repo = repo; git.refresh(repo) end else core.error("%s", err) end end)
   end, core.root_project().path) end,
   ["scm:history"] = function() with_repo(history) end,
+  ["scm:review"] = function() with_repo(function(repo) review.open(repo.root) end) end,
   ["scm:stage-all"] = function() with_repo(stage_all) end,
   ["scm:unstage-all"] = function() with_repo(unstage_all) end,
   ["scm:commit"] = function() with_repo(function(repo)
@@ -615,6 +620,7 @@ commands["scm:actions"] = function()
 end
 command.add(nil, commands)
 keymap.add({["ctrl+shift+g"] = "scm:toggle"})
+keymap.add({[PLATFORM == "Mac OS X" and "cmd+shift+r" or "ctrl+shift+r"] = "scm:review"})
 local old_add = core.add_project
 function core.add_project(...)
   local project = old_add(...)

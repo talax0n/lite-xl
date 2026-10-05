@@ -112,6 +112,32 @@ function core.init(...)
     tv:set_text('')
     assert(#tv.files == 0 and #tv.rows == 0, 'Text view did not reset')
     assert(views.prompt and views.confirm, 'Shared prompt helpers missing')
+    -- Commit review: unpushed commits on the main checkout.
+    local review = require 'plugins.scm.review'
+    local root = workspace .. '/mine'
+    local function write(path, text) local f = assert(io.open(path, 'wb')); f:write(text); f:close() end
+    local function read(path) local f = io.open(path, 'rb'); if not f then return nil end; local s = f:read('*a'); f:close(); return s end
+    local function commit(cwd, message) run(cwd, {'add', '-A'}); run(cwd, {'-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-m', message}) end
+    local function wait(cond, message, seconds)
+      local limit = system.get_time() + (seconds or 8)
+      repeat coroutine.yield(0.1) until cond() or system.get_time() > limit
+      assert(cond(), message)
+    end
+    local function ahead() return tonumber((scm.git.exec(root, 'git', {'rev-list', '--count', '@{upstream}..HEAD'}))) end
+    run(root, {'-c', 'user.name=T', '-c', 'user.email=t@x', 'pull', '--rebase'})
+    write(root .. '/a.lua', 'local a = 1\nlocal b = 2\nreturn a + b\n'); commit(root, 'add a')
+    write(root .. '/b.lua', 'return 1\n'); commit(root, 'add b')
+    assert(command.map['scm:review'], 'scm:review command missing')
+    review.open(root)
+    local rv
+    wait(function() rv = core.active_view; return rv:is(review.Review) and rv.sig ~= nil end, 'Review did not open')
+    assert(#rv.files == 2 and #rv.commits == ahead() and rv.target.main, 'Review range: ' .. #rv.files .. ' files, ' .. #rv.commits .. ' commits')
+    rv:toggle_viewed('a.lua', true)
+    wait(function() return (read(root .. '/.trex/viewed') or ''):find('a.lua', 1, true) end, 'Viewed state not saved')
+    for _, row in ipairs(rv.rows) do assert(not (row.kind ~= 'file' and row.file and row.file.path == 'a.lua'), 'Viewed file not collapsed') end
+    assert(not read(root .. '/.gitignore') and (read(root .. '/.git/info/exclude') or ''):find('.trex/', 1, true), '.trex not excluded')
+    write(root .. '/a.lua', 'local a = 10\nlocal b = 2\nreturn a + b\n'); commit(root, 'tweak a')
+    wait(function() return not rv.loading and #rv.commits == ahead() and not rv:is_viewed('a.lua') end, 'Changed file not reset to unviewed')
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
     print('PASS: nested workspace repositories, activity bar, source control sections, backlog, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)
@@ -120,6 +146,6 @@ function core.init(...)
     local ok, err = pcall(verify)
     if not ok then io.stderr:write(tostring(err) .. '\n'); os.exit(1) end
   end)
-  core.add_thread(function() coroutine.yield(25); io.stderr:write('Editor UI test timed out\n'); os.exit(1) end)
+  core.add_thread(function() coroutine.yield(90); io.stderr:write('Editor UI test timed out\n'); os.exit(1) end)
 end
 return core

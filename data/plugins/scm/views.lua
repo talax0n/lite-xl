@@ -5,61 +5,276 @@ local common = require "core.common"
 local parse = require "plugins.scm.parse"
 local M = {}
 local function line_height() return style.code_font:get_height() + style.padding.y end
+-- Diff / commit viewer: parses git output into rows (commit card, file headers,
+-- hunk bands, numbered and tinted lines) instead of printing it raw.
 local Text = View:extend()
 Text.context = "session"
+local MONTHS = {Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6, Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12}
+local function relative(date)
+  local mon, d, H, M, S, y, sign, oh, om = (date or ""):match("%a+ (%a+) (%d+) (%d+):(%d+):(%d+) (%d+) ([%+%-])(%d%d)(%d%d)")
+  if not mon or not MONTHS[mon] then return date or "" end
+  local t = os.time({year = tonumber(y), month = MONTHS[mon], day = tonumber(d), hour = tonumber(H), min = tonumber(M), sec = tonumber(S)})
+  t = t + (os.time() - os.time(os.date("!*t"))) - (tonumber(oh) * 3600 + tonumber(om) * 60) * (sign == "-" and -1 or 1)
+  local s = os.time() - t
+  if s < 60 then return "just now" end
+  if s < 3600 then return (s // 60) .. " min ago" end
+  if s < 86400 then return (s // 3600) .. (s < 7200 and " hour ago" or " hours ago") end
+  if s < 86400 * 14 then return (s // 86400) .. (s < 172800 and " day ago" or " days ago") end
+  return os.date("%b %d, %Y", t)
+end
+local function tint(c, a) return {c[1], c[2], c[3], a} end
+local function split_path(path) local dir, name = path:match("^(.*)/([^/]+)$"); return name or path, dir or "" end
+local avatar_colors = {{235, 188, 186}, {196, 167, 231}, {156, 207, 216}, {246, 193, 119}, {62, 143, 176}, {234, 154, 151}}
+
 function Text:new(name, text, actions)
   Text.super.new(self); self.name, self.actions = name, actions or {}; self.scrollable = true
-  self.lines, self.width, self.hunk = {}, 0, 0
-  for raw_line in (text .. "\n"):gmatch("([^\n]*)\n") do
-    local line = raw_line
-    if #self.lines >= 20000 then self.lines[#self.lines + 1] = "Display limited to 20,000 lines. Use the terminal for the complete output."; break end
-    if #line > 4096 then line = line:sub(1, 4096) .. " [line clipped]" end
-    self.lines[#self.lines + 1] = line
-    self.width = math.max(self.width, #line * style.code_font:get_width("M"))
-  end
+  self.rows, self.width, self.hunk, self.files = {}, 0, 0, {}
   self.hunks = parse.hunks(text)
+  local lines = {}
+  for raw_line in (text .. "\n"):gmatch("([^\n]*)\n") do
+    if #lines >= 20000 then lines[#lines + 1] = "Display limited to 20,000 lines. Use the terminal for the complete output."; break end
+    lines[#lines + 1] = #raw_line > 4096 and raw_line:sub(1, 4096) .. " [line clipped]" or raw_line
+  end
+  while lines[#lines] == "" do table.remove(lines) end
+  local rows, i = self.rows, 1
+  local function add(row) rows[#rows + 1] = row; return row end
+  if lines[1] and lines[1]:match("^commit %x+") then
+    local meta = {hash = lines[1]:match("^commit (%x+)"), refs = lines[1]:match("%((.*)%)"), body = {}}
+    i = 2
+    while lines[i] and lines[i] ~= "" do
+      local key, value = lines[i]:match("^(%a+):%s*(.*)$")
+      if key == "Author" then meta.author = value:match("^(.-)%s*<") or value
+      elseif key == "AuthorDate" or key == "Date" then meta.date = value end
+      i = i + 1
+    end
+    while lines[i] and (lines[i] == "" or lines[i]:sub(1, 4) == "    ") do meta.body[#meta.body + 1] = lines[i]:sub(5); i = i + 1 end
+    while meta.body[1] == "" do table.remove(meta.body, 1) end
+    while meta.body[#meta.body] == "" do table.remove(meta.body) end
+    -- The --stat block is recomputed from the diff below.
+    while lines[i] and not lines[i]:match("^diff ") do i = i + 1 end
+    self.meta = meta
+    add({kind = "gap"})
+    add({kind = "subject", text = table.remove(meta.body, 1) or ""})
+    add({kind = "author", meta = meta})
+    if #meta.body > 0 then add({kind = "gap"}) end
+    for _, line in ipairs(meta.body) do add({kind = "body", text = line}) end
+    add({kind = "gap"})
+    self.summary = add({kind = "summary"})
+  end
+  local file, header, old, new, diff = nil, false, 0, 0, false
+  for j = i, #lines do
+    local l = lines[j]
+    if l:match("^diff %-%-git ") or l:match("^diff %-%-cc ") then
+      file = {path = l:match(" b/(.+)$") or l:match("^diff %-%-cc (.+)$") or l, adds = 0, dels = 0}
+      self.files[#self.files + 1] = file; diff, header = true, true
+      file.row = add({kind = "file", file = file})
+    elseif header and not l:match("^@@") then
+      if l:match("^new file") then file.badge = "new"
+      elseif l:match("^deleted file") then file.badge = "deleted"
+      elseif l:match("^rename from ") then file.badge = "renamed"; file.from = l:sub(13)
+      elseif l:match("^Binary files") then add({kind = "note", text = "Binary file not shown"}) end
+    elseif l:match("^@@") then
+      header, diff = false, true
+      old, new = tonumber(l:match("%-(%d+)")) or 0, tonumber(l:match("%+(%d+)")) or 0
+      add({kind = "hunk", text = l, hunk = l:match("^@@ ") and self:count_hunks() or nil})
+    elseif diff and file then
+      local c = l:sub(1, 1)
+      local row = {text = l:sub(2), hunk = self.current_hunk}
+      if c == "+" then row.kind, row.new = "add", new; new = new + 1; file.adds = file.adds + 1
+      elseif c == "-" then row.kind, row.old = "del", old; old = old + 1; file.dels = file.dels + 1
+      elseif c == "\\" then row.kind, row.text = "note", l
+      else row.kind, row.old, row.new = "ctx", old, new; old, new = old + 1, new + 1 end
+      add(row); self.width = math.max(self.width, #row.text)
+    else
+      add({kind = "plain", text = l}); self.width = math.max(self.width, #l)
+    end
+  end
+  if self.summary then
+    for _, f in ipairs(self.files) do add({kind = "filelist", file = f}) end
+    -- move the file list right after the summary
+    local list = {}
+    for k = #rows, 1, -1 do if rows[k].kind == "filelist" then table.insert(list, 1, table.remove(rows, k)) end end
+    local at; for k, row in ipairs(rows) do if row == self.summary then at = k end end
+    for k, row in ipairs(list) do table.insert(rows, at + k, row) end
+    table.insert(rows, at + #list + 1, {kind = "gap"})
+  end
+  self:layout()
 end
+function Text:count_hunks() self.current_hunk = (self.current_hunk or 0) + 1; return self.current_hunk end
 function Text:get_name() return self.name end
-function Text:get_scrollable_size() return (#self.lines + 3) * line_height() end
-function Text:get_h_scrollable_size() return self.width + style.padding.x * 2 end
-function Text:on_mouse_wheel(y, x) self.scroll.to.y = self.scroll.to.y - y * line_height() * 3; self.scroll.to.x = self.scroll.to.x + (x or 0) * 30; return true end
+local function code_h() return style.code_font:get_height() + math.floor(5 * SCALE) end
+function Text:layout()
+  local y, fh = 0, style.font:get_height()
+  local heights = {
+    gap = style.padding.y, subject = math.floor(fh * 1.3) + style.padding.y, author = fh + style.padding.y * 2,
+    body = fh + math.floor(4 * SCALE), summary = fh + style.padding.y, filelist = fh + math.floor(8 * SCALE),
+    file = fh + style.padding.y * 2,
+  }
+  for _, row in ipairs(self.rows) do
+    if row.kind == "file" and y > 0 then y = y + style.padding.y end
+    row.y = y; row.h = heights[row.kind] or code_h(); y = y + row.h
+  end
+  self.total, self.layout_scale = y, SCALE
+end
+function Text:toolbar_height() return style.font:get_height() + style.padding.y * 2 end
+function Text:gutter() return #self.files > 0 and style.code_font:get_width("00000") * 2 + style.code_font:get_width("+ ") + style.padding.x or style.padding.x end
+function Text:get_scrollable_size() return self.total + self:toolbar_height() + style.padding.y * 4 end
+function Text:get_h_scrollable_size() return self.width * style.code_font:get_width("M") + self:gutter() + style.padding.x * 2 end
+function Text:on_mouse_wheel(y, x) self.scroll.to.y = self.scroll.to.y - y * code_h() * 3; self.scroll.to.x = self.scroll.to.x + (x or 0) * 30; return true end
+function Text:row_at(py)
+  local lo, hi = 1, #self.rows
+  while lo < hi do
+    local mid = (lo + hi + 1) // 2
+    if self.rows[mid].y <= py then lo = mid else hi = mid - 1 end
+  end
+  return lo
+end
+function Text:on_mouse_moved(x, y, ...)
+  Text.super.on_mouse_moved(self, x, y, ...)
+  self.mouse_x, self.mouse_y = x, y
+end
+function Text:on_mouse_left() Text.super.on_mouse_left(self); self.mouse_x = nil end
+function Text:hovered(x, y, w, h)
+  local mx, my = self.mouse_x, self.mouse_y
+  return mx and mx >= x and mx < x + w and my >= y and my < y + h
+end
+local function pill(font, text, x, y, h, bg, fg)
+  local w = font:get_width(text) + math.floor(10 * SCALE)
+  local ph = font:get_height() + math.floor(4 * SCALE)
+  renderer.draw_rect(x, y + (h - ph) / 2, w, ph, bg)
+  common.draw_text(font, fg, text, "center", x, y, w, h)
+  return x + w + math.floor(6 * SCALE)
+end
+local function stats(x, y, h, adds, dels, align_right)
+  local plus, minus = "+" .. adds, "−" .. dels
+  local w = style.font:get_width(plus) + style.font:get_width(minus) + math.floor(8 * SCALE)
+  if align_right then x = x - w end
+  x = common.draw_text(style.font, style.good, plus, nil, x, y, 0, h) + math.floor(8 * SCALE)
+  common.draw_text(style.font, style.error, minus, nil, x, y, 0, h)
+  return w
+end
+function Text:draw_row(row, x, y, w)
+  local px, h = style.padding.x, row.h
+  local kind = row.kind
+  if kind == "subject" then
+    self.subject_font = self.subject_font or style.font:copy(style.font:get_size() * 1.3)
+    common.draw_text(self.subject_font, style.syntax.normal, row.text, nil, x + px, y, 0, h)
+  elseif kind == "author" then
+    local m, s = row.meta, math.floor(style.font:get_height() * 1.3)
+    local name = m.author or "?"
+    local seed = 0; for c in name:gmatch(".") do seed = seed + c:byte() end
+    renderer.draw_rect(x + px, y + (h - s) / 2, s, s, avatar_colors[seed % #avatar_colors + 1])
+    common.draw_text(style.font, style.background, name:sub(1, 1):upper(), "center", x + px, y, s, h)
+    local tx = common.draw_text(style.font, style.syntax.normal, name, nil, x + px + s + math.floor(10 * SCALE), y, 0, h)
+    tx = common.draw_text(style.font, style.dim, "  committed " .. relative(m.date) .. "  ", nil, tx, y, 0, h)
+    tx = pill(style.code_font, m.hash:sub(1, 8), tx, y, h, style.background3, style.text)
+    for ref in (m.refs or ""):gmatch("[^,]+") do
+      ref = ref:gsub("^%s+", ""):gsub("^HEAD %-> ", "")
+      tx = pill(style.font, ref, tx, y, h, tint(style.caret, 50), style.caret)
+    end
+  elseif kind == "body" then
+    common.draw_text(style.font, style.text, row.text, nil, x + px, y, 0, h)
+  elseif kind == "summary" then
+    local adds, dels = 0, 0; for _, f in ipairs(self.files) do adds, dels = adds + f.adds, dels + f.dels end
+    renderer.draw_rect(x + px, y, w - px * 2, math.max(1, SCALE), style.divider)
+    local label = #self.files .. (#self.files == 1 and " file changed  " or " files changed  ")
+    local tx = common.draw_text(style.font, style.dim, label, nil, x + px, y, 0, h)
+    stats(tx, y, h, adds, dels)
+  elseif kind == "filelist" then
+    local f = row.file
+    if self:hovered(x, y, w, h) then renderer.draw_rect(x + px / 2, y, w - px, h, style.line_highlight) end
+    local name, dir = split_path(f.path)
+    local tx = common.draw_text(style.font, style.syntax.normal, name, nil, x + px, y, 0, h)
+    common.draw_text(style.font, style.dim, "  " .. dir, nil, tx, y, 0, h)
+    -- 5-block bar like `git --stat`
+    local bw, gap = math.floor(7 * SCALE), math.floor(2 * SCALE)
+    local bx = x + w - px - 5 * (bw + gap)
+    local total = f.adds + f.dels
+    local green = total > 0 and math.floor(5 * f.adds / total + 0.5) or 0
+    for b = 1, 5 do
+      local c = total == 0 and style.divider or b <= green and style.good or style.error
+      renderer.draw_rect(bx + (b - 1) * (bw + gap), y + (h - bw) / 2, bw, bw, c)
+    end
+    stats(bx - math.floor(10 * SCALE), y, h, f.adds, f.dels, true)
+  elseif kind == "file" then
+    local f = row.file
+    renderer.draw_rect(x, y, w, h, style.background2)
+    renderer.draw_rect(x, y, w, math.max(1, SCALE), style.divider)
+    renderer.draw_rect(x, y + h - math.max(1, SCALE), w, math.max(1, SCALE), style.divider)
+    local name, dir = split_path(f.path)
+    local tx = common.draw_text(style.font, style.syntax.normal, name, nil, x + px, y, 0, h)
+    tx = common.draw_text(style.font, style.dim, "  " .. (f.from and (f.from .. " → ") or "") .. dir .. "  ", nil, tx, y, 0, h)
+    if f.badge then
+      local c = f.badge == "new" and style.good or f.badge == "deleted" and style.error or style.modified
+      pill(style.font, f.badge, tx, y, h, tint(c, 45), c)
+    end
+    stats(x + w - px, y, h, f.adds, f.dels, true)
+  elseif kind == "hunk" then
+    renderer.draw_rect(x, y, w, h, tint(style.modified, 22))
+    common.draw_text(style.code_font, style.dim, row.text, nil, x + self:gutter() - self.scroll.x, y, 0, h)
+  elseif kind == "add" or kind == "del" or kind == "ctx" then
+    local g, cw = self:gutter(), style.code_font:get_width("00000")
+    local c = kind == "add" and style.good or kind == "del" and style.error
+    if c then renderer.draw_rect(x, y, w, h, tint(c, 28)); renderer.draw_rect(x, y, g - px / 2, h, tint(c, 30)) end
+    core.push_clip_rect(x + g - px / 2, y, w - g + px / 2, h)
+    common.draw_text(style.code_font, style.syntax.normal, row.text, nil, x + g - self.scroll.x, y, 0, h)
+    core.pop_clip_rect()
+    if row.old then common.draw_text(style.code_font, style.dim, tostring(row.old), "right", x, y, cw, h) end
+    if row.new then common.draw_text(style.code_font, style.dim, tostring(row.new), "right", x + cw, y, cw, h) end
+    if c then common.draw_text(style.code_font, c, kind == "add" and "+" or "−", nil, x + cw * 2 + style.code_font:get_width(" "), y, 0, h) end
+  elseif kind == "note" then
+    common.draw_text(style.code_font, style.dim, row.text, nil, x + self:gutter(), y, 0, h)
+  elseif kind == "plain" then
+    common.draw_text(style.code_font, style.syntax.normal, row.text, nil, x + px - self.scroll.x, y, 0, h)
+  end
+  if row.hunk and row.hunk == self.hunk then renderer.draw_rect(x, y, math.floor(3 * SCALE), h, style.accent) end
+end
 function Text:draw()
+  if self.layout_scale ~= SCALE then self:layout() end
   self:draw_background(style.background)
-  local lh = line_height()
-  local x, y = self:get_content_offset(); x = x + style.padding.x; y = y + lh * 2
-  core.push_clip_rect(self.position.x, self.position.y + lh * 2, self.size.x, self.size.y - lh * 2)
-  local first = math.max(1, math.floor(self.scroll.y / lh) - 1)
-  local last = math.min(#self.lines, first + math.ceil(self.size.y / lh) + 1)
-  local hunk = 0
-  for i = 1, first - 1 do if self.lines[i]:match("^@@ ") then hunk = hunk + 1 end end
-  for i = first, last do
-    local text, color = self.lines[i], style.text
-    if text:match("^@@ ") then hunk = hunk + 1; color = style.accent
-    elseif text:sub(1, 1) == "+" then color = {110, 200, 130}
-    elseif text:sub(1, 1) == "-" then color = {230, 120, 120} end
-    if hunk > 0 and hunk == self.hunk then renderer.draw_rect(self.position.x, y + (i - 1) * lh, self.size.x, lh, style.line_highlight) end
-    renderer.draw_text(style.code_font, text, x, y + (i - 1) * lh, color)
+  local tb = self:toolbar_height()
+  local x, top = self.position.x, self.position.y + tb
+  core.push_clip_rect(x, top, self.size.x, self.size.y - tb)
+  for i = self:row_at(self.scroll.y), #self.rows do
+    local row = self.rows[i]
+    local y = top + row.y - self.scroll.y
+    if y > self.position.y + self.size.y then break end
+    self:draw_row(row, x, y, self.size.x)
   end
   core.pop_clip_rect()
-  self.buttons = {}; x, y = self.position.x + style.padding.x, self.position.y + style.padding.y
+  -- Toolbar: action pills, hunk hint on the right.
+  renderer.draw_rect(x, self.position.y, self.size.x, tb, style.background)
+  renderer.draw_rect(x, self.position.y + tb - math.max(1, SCALE), self.size.x, math.max(1, SCALE), style.divider)
+  self.buttons = {}
+  local bx, by, bh = x + style.padding.x, self.position.y, tb
   for _, action in ipairs(self.actions) do
-    local w = style.font:get_width(action.text) + style.padding.x * 2
-    renderer.draw_text(style.font, action.text, x, y, style.accent)
-    self.buttons[#self.buttons + 1] = {x = x, w = w, fn = action.fn}; x = x + w
+    local w = style.font:get_width(action.text) + style.padding.x * 1.5
+    local ph = style.font:get_height() + math.floor(8 * SCALE)
+    local hovered = self:hovered(bx, by + (bh - ph) / 2, w, ph)
+    renderer.draw_rect(bx, by + (bh - ph) / 2, w, ph, hovered and style.selection or style.background3)
+    common.draw_text(style.font, hovered and style.accent or style.text, action.text, "center", bx, by, w, bh)
+    self.buttons[#self.buttons + 1] = {x = bx, w = w, fn = action.fn}
+    bx = bx + w + math.floor(6 * SCALE)
   end
-  if #self.actions == 0 then renderer.draw_text(style.font, self.name, x, y, style.dim) end
-  if #self.hunks > 0 then renderer.draw_text(style.font, "Click a diff hunk to select it", self.position.x + style.padding.x, self.position.y + lh, style.dim) end
+  if #self.actions == 0 then common.draw_text(style.font, style.dim, self.name, nil, bx, by, 0, bh) end
+  local hunk_actions = false; for _, a in ipairs(self.actions) do if a.text:match("hunk") then hunk_actions = true end end
+  if hunk_actions and #self.hunks > 0 then
+    local hint = self.hunk > 0 and string.format("Hunk %d of %d", self.hunk, #self.hunks) or "Click a hunk to select it"
+    common.draw_text(style.font, style.dim, hint, "right", x, by, self.size.x - style.padding.x, bh)
+  end
   self:draw_scrollbar()
 end
 function Text:on_mouse_pressed(button, x, y, clicks)
   if Text.super.on_mouse_pressed(self, button, x, y, clicks) then return true end
-  if y < self.position.y + line_height() then
+  local tb = self:toolbar_height()
+  if y < self.position.y + tb then
     for _, b in ipairs(self.buttons or {}) do if x >= b.x and x < b.x + b.w then b.fn(self); return true end end
+    return true
   end
-  local index = math.floor((y - self.position.y + self.scroll.y) / line_height()) - 1
-  local hunk = 0
-  for i = 1, math.min(index, #self.lines) do if self.lines[i]:match("^@@ ") then hunk = hunk + 1 end end
-  self.hunk = hunk; core.redraw = true; return true
+  local row = self.rows[self:row_at(y - self.position.y - tb + self.scroll.y)]
+  if row and row.kind == "filelist" then self.scroll.to.y = row.file.row.y
+  elseif row and row.hunk then self.hunk = row.hunk end
+  core.redraw = true; return true
 end
 M.Text = Text
 

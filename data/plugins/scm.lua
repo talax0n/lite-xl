@@ -94,7 +94,10 @@ local function diff(repo, entry)
       local content = fp:read(1024 * 1024 + 1); fp:close()
       if #content > 1024 * 1024 then return nil, "File exceeds 1 MiB preview limit" end
       if content:find("\0", 1, true) then return "Binary file. Stage it with the file action." end
-      return content
+      -- Shown as an all-added diff so it renders like other changes.
+      local lines = {}; for line in content:gmatch("([^\n]*)\n?") do lines[#lines + 1] = "+" .. line end
+      if lines[#lines] == "+" then lines[#lines] = nil end
+      return "diff --git a/" .. entry.path .. " b/" .. entry.path .. "\nnew file mode 100644\n@@ -0,0 +1," .. #lines .. " @@\n" .. table.concat(lines, "\n")
     end
     return git.git(repo, args)
   end, function(out)
@@ -118,7 +121,7 @@ local function diff(repo, entry)
 end
 local function inspect(repo, commit)
   git.enqueue(repo, "Inspect commit", function()
-    return git.git(repo, {"show", "--no-ext-diff", "--no-textconv", "--format=fuller", "--stat", "--patch", commit.hash, "--"})
+    return git.git(repo, {"show", "--no-ext-diff", "--no-textconv", "--decorate", "--format=fuller", "--stat", "--patch", commit.hash, "--"})
   end, function(out)
     if out then show_output(commit.hash:sub(1, 8) .. ": " .. commit.subject, out, {
       {text = "Copy hash", fn = function() system.set_clipboard(commit.hash) end},

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "api/api.h"
@@ -141,7 +142,9 @@ init_lua:
   }
   lua_setglobal(L, "ARGS");
 
-  lua_pushstring(L, SDL_GetPlatform());
+  /* SDL3 reports "macOS"; the Lua side (keymaps, plugins) checks "Mac OS X". */
+  const char *platform = SDL_GetPlatform();
+  lua_pushstring(L, strcmp(platform, "macOS") == 0 ? "Mac OS X" : platform);
   lua_setglobal(L, "PLATFORM");
 
   lua_pushstring(L, LITE_ARCH_TUPLE);

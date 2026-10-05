@@ -28,7 +28,12 @@ local avatar_colors = {{235, 188, 186}, {196, 167, 231}, {156, 207, 216}, {246, 
 
 function Text:new(name, text, actions)
   Text.super.new(self); self.name, self.actions = name, actions or {}; self.scrollable = true
+  self:set_text(text)
+end
+-- Parses git output into rows; also reloads a view in place.
+function Text:set_text(text)
   self.rows, self.width, self.hunk, self.files = {}, 0, 0, {}
+  self.meta, self.summary, self.current_hunk = nil, nil, nil
   self.hunks = parse.hunks(text)
   local lines = {}
   for raw_line in (text .. "\n"):gmatch("([^\n]*)\n") do
@@ -79,7 +84,7 @@ function Text:new(name, text, actions)
       add({kind = "hunk", text = l, hunk = l:match("^@@ ") and self:count_hunks() or nil})
     elseif diff and file then
       local c = l:sub(1, 1)
-      local row = {text = l:sub(2), hunk = self.current_hunk}
+      local row = {text = l:sub(2), hunk = self.current_hunk, file = file}
       if c == "+" then row.kind, row.new = "add", new; new = new + 1; file.adds = file.adds + 1
       elseif c == "-" then row.kind, row.old = "del", old; old = old + 1; file.dels = file.dels + 1
       elseif c == "\\" then row.kind, row.text = "note", l
@@ -251,8 +256,8 @@ function Text:draw()
     local w = style.font:get_width(action.text) + style.padding.x * 1.5
     local ph = style.font:get_height() + math.floor(8 * SCALE)
     local hovered = self:hovered(bx, by + (bh - ph) / 2, w, ph)
-    renderer.draw_rect(bx, by + (bh - ph) / 2, w, ph, hovered and style.selection or style.background3)
-    common.draw_text(style.font, hovered and style.accent or style.text, action.text, "center", bx, by, w, bh)
+    renderer.draw_rect(bx, by + (bh - ph) / 2, w, ph, action.primary and style.caret or hovered and style.selection or style.background3)
+    common.draw_text(style.font, action.primary and style.background or hovered and style.accent or style.text, action.text, "center", bx, by, w, bh)
     self.buttons[#self.buttons + 1] = {x = bx, w = w, fn = action.fn}
     bx = bx + w + math.floor(6 * SCALE)
   end
@@ -350,6 +355,16 @@ function Graph:on_mouse_pressed(button, x, y, clicks)
   core.redraw = true; return true
 end
 M.Graph = Graph
+function M.prompt(label, submit, text, choices)
+  core.command_view:enter(label, {text = text or "", submit = submit,
+    suggest = choices and function(input)
+      local result = {}; for _, choice in ipairs(choices) do if choice:lower():find(input:lower(), 1, true) then result[#result + 1] = choice end end
+      return result
+    end or nil})
+end
+function M.confirm(label, message, fn)
+  core.nag_view:show(label, message, {{text = "Cancel"}, {text = "Continue", default_yes = true}}, function(item) if item.text == "Continue" then fn() end end)
+end
 function M.open(view)
   local node = core.root_view:get_active_node_default()
   for _, old in ipairs(node.views) do
@@ -359,7 +374,7 @@ function M.open(view)
   end
   for i = #node.views, 1, -1 do
     local old = node.views[i]
-    if view:is(Text) and old:is(Text) then node:close_view(core.root_view.root_node, old) end
+    if view:is(Text) and old:is(Text) and not old.persistent then node:close_view(core.root_view.root_node, old) end
   end
   node:add_view(view)
   core.root_view.root_node:update_layout()

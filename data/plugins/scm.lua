@@ -23,16 +23,7 @@ local function set_visible(view, visible)
   if not visible and core.active_view == view then core.set_active_view(core.root_view:get_primary_node().active_view) end
   core.redraw = true
 end
-local function prompt(label, submit, text, choices)
-  core.command_view:enter(label, {text = text or "", submit = submit,
-    suggest = choices and function(input)
-      local result = {}; for _, choice in ipairs(choices) do if choice:lower():find(input:lower(), 1, true) then result[#result + 1] = choice end end
-      return result
-    end or nil})
-end
-local function confirm(label, message, fn)
-  core.nag_view:show(label, message, {{text = "Cancel"}, {text = "Continue", default_yes = true}}, function(item) if item.text == "Continue" then fn() end end)
-end
+local prompt, confirm = views.prompt, views.confirm
 local function current()
   if selected_repo then return selected_repo end
   local path = core.active_view.doc and core.active_view.doc.abs_filename

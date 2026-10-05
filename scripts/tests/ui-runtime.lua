@@ -106,6 +106,12 @@ function core.init(...)
     assert(bp.visible and bp.size.x > 0 and bp.position.x > tree.position.x, 'Backlog not docked on the right')
     command.perform('backlog:toggle')
     assert(not bp.visible, 'Backlog did not hide')
+    local views = require 'plugins.scm.views'
+    local tv = views.Text('t', 'diff --git a/f.lua b/f.lua\n@@ -1 +1 @@\n-old\n+new\n')
+    assert(#tv.files == 1 and tv.rows[#tv.rows].file == tv.files[1], 'Diff rows not linked to files')
+    tv:set_text('')
+    assert(#tv.files == 0 and #tv.rows == 0, 'Text view did not reset')
+    assert(views.prompt and views.confirm, 'Shared prompt helpers missing')
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
     print('PASS: nested workspace repositories, activity bar, source control sections, backlog, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)

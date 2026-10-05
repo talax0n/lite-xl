@@ -187,3 +187,32 @@ The macOS build and interactive graph/terminal were verified locally. Linux and
 Windows backends still need verification on those operating systems. GitHub
 account operations need authenticated testing before treating that integration
 as fully verified.
+
+## Commit review
+
+Press **Cmd+Shift+R** (Ctrl+Shift+R elsewhere), or click **Review N unpushed
+commits** in Source Control, to review work before it leaves your machine.
+TreX lists the main checkout when it is ahead of its upstream, and every git
+worktree with commits ahead of the main checkout's branch (agent worktrees from
+t3code, Claude Code and others are found through `git worktree list`).
+
+The left pane lists changed files. Click the box or press **v** to mark a file
+viewed and jump to the next one; viewed files collapse, and become unviewed
+again when a new commit changes them. The toolbar switches between all changes
+and a single commit.
+
+Click a line number (or select a line and press **c**; Shift+click selects a
+range) to leave a note. Notes are saved to `.trex/review.md` in the checkout,
+which git ignores through `info/exclude`. **Copy notes** puts the open notes
+on the clipboard for your agent; the agent can also read the file and tick
+`[x]` when done. Notes follow their code when it moves and are marked outdated
+when it disappears.
+
+Double-click a line to open the file beside the review. Files you save while
+reviewing appear in an **Uncommitted fixes** banner; **Commit fixes** commits
+only those files as `fix: address review`.
+
+Finish with **Push** (main checkout), or for a worktree **Merge into
+<branch>** (then remove the worktree), **Push branch**, or **Discard**, which
+deletes the worktree and its branch. Finished reviews are archived to
+`.trex/reviews/` in the main checkout.

@@ -12,15 +12,43 @@ line notes the agent can act on, occasionally fix things by hand, then push.
 Success: open one view, walk all changed files with viewed tracking, leave
 notes, hand them to the agent (clipboard or file), commit own fixes, push.
 
+Agents often work in their own git worktrees (t3code `~/.t3/worktrees`,
+Claude Code `.claude/worktrees`, …). Each worktree branch is a review target
+with its own finish actions: merge, push, or discard.
+
 Out of scope (later): GitHub PR review via `gh`, fixup/autosquash of own fixes
 into original commits, threaded replies.
 
+## Review targets
+
+A target is `{root, branch, base}`. Targets come from
+`git worktree list --porcelain` run in the current repo, so every worktree is
+found regardless of where the agent created it.
+
+- **Main checkout**: base = `@{upstream}`; fallback `origin/HEAD`; no remote →
+  prompt for a base ref. Range `base..HEAD`.
+- **Worktree**: base = the main checkout's current branch (e.g. `master`).
+  Range = `git diff <base>...<branch>` (from the merge-base), commits
+  `<base>..<branch>`. Base is changeable from the toolbar.
+- Bare entries and the worktree list's `prunable` entries are skipped.
+- Locked worktrees are listed; Discard is disabled for them.
+
+`scm:review` with more than one target ahead > 0 → quick picker:
+`⎇ agent/fix-auth  · 3 commits · dirty   ~/.t3/worktrees/lite-xl/fix-auth`.
+One target → opens directly. In the view, a target picker sits left of the
+commit picker: `[⎇ agent/fix-auth ▾] [All changes ▾]`.
+
+### Dirty worktrees
+
+If the target has uncommitted changes, a banner shows
+`Agent left uncommitted changes: N files [Show]`; Show opens the existing
+working-tree diff view. Merge/Push ask for confirmation while dirty, since the
+uncommitted work would not be included.
+
 ## Scope of a review
 
-- Range: `@{upstream}..HEAD`; fallback `origin/HEAD..HEAD`; no remote → prompt
-  for a base ref.
 - 0 commits ahead → "Nothing to review".
-- Detached HEAD or rebase/merge in progress → banner, Push disabled.
+- Detached HEAD or rebase/merge in progress → banner, Push/Merge disabled.
 
 ## Entry points
 
@@ -104,8 +132,10 @@ touch a file reset it to unviewed while untouched files stay ✓.
 
 ### Git hygiene
 
-First write into `.trex/` appends `.trex/` to `$(git rev-parse --git-dir)/info/exclude`
-if absent. Nothing in `.trex/` is ever committed; `.gitignore` is untouched.
+Notes and viewed state live in `<target root>/.trex/`, so each worktree has
+its own review. First write appends `.trex/` to
+`$(git rev-parse --git-common-dir)/info/exclude` if absent; that file is
+shared by all worktrees of the repo. Nothing in `.trex/` is ever committed; `.gitignore` is untouched.
 
 ## Copy notes
 
@@ -135,9 +165,32 @@ Address these review notes (also in .trex/review.md; tick [x] when done):
 - On success: range empty → "All reviewed and pushed"; `review.md` moved to
   `.trex/reviews/<YYYY-MM-DD>-<shortsha>.md`; `.trex/viewed` cleared.
 
+## Finish actions for worktree targets
+
+Shown in the toolbar instead of Push when the target is a worktree. Same
+"N files unviewed, M open notes" confirm as Push when the review is incomplete.
+
+- **Merge into `<base>`**: runs in the main checkout. Refuses if the main
+  checkout is not on `<base>` or has uncommitted changes (error names the
+  problem). `git merge --ff-only <branch>`; if not fast-forwardable,
+  `git merge --no-edit <branch>`; conflicts → stop and open Source Control on
+  the main checkout. On success confirm "Remove worktree and delete branch?"
+  → `git worktree remove <root>` + `git branch -d <branch>`.
+- **Push branch**: in the worktree, `git push -u origin <branch>`. Worktree
+  kept.
+- **Discard**: confirm "Delete worktree <root> and branch <branch> with N
+  unmerged commits? This cannot be undone." → `git worktree remove --force
+  <root>` + `git branch -D <branch>`.
+
+Before a worktree is removed (merge or discard), its `.trex/review.md` is
+archived to the main checkout's `.trex/reviews/<YYYY-MM-DD>-<branch>-<shortsha>.md`,
+because the worktree folder is deleted. After removal the view switches to the
+next target, or shows "Nothing to review".
+
 ## Refresh
 
-- Reload when HEAD sha changes or `review.md` mtime changes, piggybacking on
+- Target list re-read on the same poll, so new agent worktrees appear.
+- Reload when the target's HEAD sha changes or `review.md` mtime changes, piggybacking on
   the existing background SCM poll — no new watcher.
 - Preserve scroll position, current file and viewed marks across reloads.
 
@@ -152,7 +205,7 @@ Address these review notes (also in .trex/review.md; tick [x] when done):
 | File | Role | Size |
 |---|---|---|
 | `data/plugins/scm/review_notes.lua` | pure: parse/serialize `review.md`, re-anchor, viewed state, copy text. No UI, no git. | ~120 lines |
-| `data/plugins/scm/review.lua` | `ReviewView`: layout, file list, picker, notes UI, actions, git calls via `git.enqueue` | ~300 lines |
+| `data/plugins/scm/review.lua` | `ReviewView`: targets, layout, file list, pickers, notes UI, actions, git calls via `git.enqueue` | ~380 lines |
 | `data/plugins/scm.lua` | `scm:review` command, sidebar button | small |
 | `data/core/keymap-macos.lua`, `data/core/keymap.lua` | keybinding | 1 line each |
 | `scripts/tests/ui-runtime.lua` | end-to-end block | ~40 lines |
@@ -164,15 +217,22 @@ Address these review notes (also in .trex/review.md; tick [x] when done):
 - `reanchor(note, lines) -> note` — sets `from/to` or `outdated = true`
 - `viewed_parse(text) -> map`, `viewed_serialize(map) -> text`
 - `copy_text(doc) -> string`
+- `parse_worktrees(porcelain) -> {{root, branch, head, bare, locked, prunable}}`
 
 ## Testing
 
 1. `review_notes.lua` self-check (`demo()` run headless): parse/serialize
    round-trip incl. ticked, range, general and unknown lines; re-anchor moved
-   / gone / duplicate-nearest; viewed reset on blob change.
+   / gone / duplicate-nearest; viewed reset on blob change; worktree porcelain
+   parsing incl. detached, locked, bare, prunable.
 2. `scripts/tests/ui-runtime.lua` e2e on the existing bare-remote clones:
    2 commits ahead → `scm:review` lists files and 2 commits; add note → file
    written and `.trex/` excluded; third commit edits a viewed file → unviewed
    and note re-anchored; edit + Commit fixes → commit contains only that file,
    unrelated dirty file untouched; Push → range empty, review archived.
+   Worktrees: `git worktree add -b agent/x` with 1 commit → listed as target
+   with base `main`; dirty file → banner; Merge into main → main has the
+   commit, worktree and branch gone, review archived in main's `.trex/reviews`;
+   second worktree → Discard → removed, branch deleted; locked worktree →
+   Discard disabled.
 3. Headless raster of the review tab to PNG, visually checked.

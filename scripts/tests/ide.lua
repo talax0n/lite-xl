@@ -140,5 +140,33 @@ wait_for(capped, 'CAP_DONE')
 local capped_screen = capped:screen()
 check(capped_screen.history_bytes <= 4 * 1024 * 1024 and capped_screen.history < 3000, 'Hard 4 MiB scrollback cap')
 capped:close()
+-- Commit review notes: file format, re-anchoring, viewed state, worktree list.
+do
+  local notes = require 'plugins.scm.review_notes'
+  local md = '# Review: main · origin/main..HEAD\n\n- [ ] `data/a b/é.lua:42` rename this\n  > local x = foo()\n- [ ] `src/x.lua:10-12` cache it\n  > function f()\n- [x] `src/main.c:3` drop include\n  > #include <string.h>\n- [ ] (general) add tests\n\nagent wrote this\n'
+  local doc = notes.parse(md)
+  check(#doc.notes == 4 and doc.notes[1].path == 'data/a b/é.lua' and doc.notes[1].from == 42 and doc.notes[1].snapshot == 'local x = foo()', 'Review note parsing')
+  check(doc.notes[2].from == 10 and doc.notes[2].to == 12 and doc.notes[3].done and not doc.notes[4].path, 'Range, resolved and general notes')
+  check(notes.serialize(doc) == md, 'Review file round-trip keeps unknown lines')
+  doc.notes[4].text = 'two\nlines'
+  check(notes.serialize(doc):find('(general) two lines', 1, true), 'Note text kept on one line')
+  local lines = {'a', 'b', 'c', 'd', 'e', '  local x = foo()'}
+  local n = notes.reanchor({path = 'f', from = 1, to = 2, snapshot = 'local x = foo()'}, lines)
+  check(n.from == 6 and n.to == 7 and not n.outdated, 'Note follows moved code')
+  n = notes.reanchor({path = 'f', from = 1, to = 1, snapshot = 'gone'}, lines)
+  check(n.outdated, 'Note outdated when code removed')
+  n = notes.reanchor({path = 'f', from = 4, to = 4, snapshot = 'x'}, {'x', 'y', 'y', 'y', 'y', 'x'})
+  check(n.from == 6, 'Nearest duplicate wins')
+  n = notes.reanchor({path = 'f', from = 2, to = 2, snapshot = ''}, {'a', '', 'c'})
+  check(n.from == 2 and not n.outdated, 'Blank snapshot keeps position')
+  n = notes.reanchor({path = 'f', from = 2, to = 2, snapshot = 'a'}, nil)
+  check(n.outdated, 'Deleted file outdates notes')
+  local viewed = notes.viewed_parse('a.lua\tabc\nb c.lua\tdef\n')
+  check(viewed['b c.lua'] == 'def' and notes.viewed_serialize(viewed) == 'a.lua\tabc\nb c.lua\tdef\n', 'Viewed state round-trip')
+  local copy = notes.copy_text(notes.parse('- [ ] (general) tests\n- [ ] `z.lua:1` z\n- [ ] `a.lua:9` a\n- [x] `a.lua:1` finished\n'))
+  check(copy:find('^Address these review notes') and copy:find('a%.lua:9.-z%.lua:1.-%(general%) tests') and not copy:find('finished', 1, true), 'Copy text order and filtering')
+  local wts = notes.parse_worktrees('worktree /r/main\nHEAD aaa\nbranch refs/heads/main\n\nworktree /r/wt one\nHEAD bbb\nbranch refs/heads/agent/x\nlocked busy\n\nworktree /r/det\nHEAD ccc\ndetached\nprunable gitdir file points to non-existent location\n\nworktree /r/bare\nbare\n')
+  check(#wts == 4 and wts[2].root == '/r/wt one' and wts[2].branch == 'agent/x' and wts[2].locked and wts[3].detached and wts[3].prunable and not wts[3].branch and wts[4].bare, 'Worktree porcelain parsing')
+end
 assert(os.execute('rm -rf ' .. tmp))
 print(string.format('PASS: %d checks against real Git repositories and a native PTY', checks))

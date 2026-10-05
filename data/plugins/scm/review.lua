@@ -176,6 +176,8 @@ function Review:update_actions()
   local t, a = self.target, {}
   a[#a + 1] = {text = (t.branch or "detached") .. " vs " .. (t.base or "?"), fn = function() self:pick_target() end}
   a[#a + 1] = {text = self.mode == "all" and "All changes" or self.mode:sub(1, 8), fn = function() self:pick_commit() end}
+  a[#a + 1] = {text = "Note", fn = function() self:general_note() end}
+  a[#a + 1] = {text = "Copy notes", fn = function() self:copy_notes() end}
   self.actions = a
 end
 
@@ -235,6 +237,93 @@ function Review:pick_target()
       elseif by[label] then self:retarget(by[label]) end
     end, "", labels)
   end)
+end
+
+-- Nearest new-side line in the same file: deleted lines have no HEAD line.
+function Review:anchor_row(row)
+  if row.new then return row end
+  local index
+  for i, r in ipairs(self.rows) do if r == row then index = i; break end end
+  if not index then return nil end
+  for i = index + 1, #self.rows do
+    local r = self.rows[i]
+    if r.file and r.file ~= row.file then break end
+    if r.new then return r end
+  end
+  for i = index - 1, 1, -1 do
+    local r = self.rows[i]
+    if r.file and r.file ~= row.file then break end
+    if r.new then return r end
+  end
+end
+
+function Review:add_note(row, text)
+  local a = self:anchor_row(self.sel_from or row)
+  local b = self:anchor_row(self.sel_to or self.sel_from or row)
+  if not a or not b or a.file ~= b.file then core.error("Pick lines from one file, or add a general note"); return end
+  if a.new > b.new then a, b = b, a end
+  local function save(body)
+    body = body:gsub("[\r\n]+", " ")
+    if body:match("^%s*$") then return end
+    local n = {done = false, path = a.file.path, from = a.new, to = b.new, text = body, snapshot = a.text}
+    table.insert(self.doc.notes, n)
+    self.sel_from, self.sel_to = nil, nil
+    if self.mode == "all" then self:build(); self:update_actions(); self:persist(true); return end
+    core.add_thread(function() -- commit line numbers -> HEAD line numbers
+      notes.reanchor(n, ops.head_lines(self.target, n.path))
+      self:build(); self:update_actions(); self:persist(true)
+    end)
+  end
+  if text then save(text)
+  else views.prompt("Note on " .. a.file.path .. ":" .. a.new .. (b.new ~= a.new and "-" .. b.new or ""), save) end
+end
+
+function Review:edit_note(n)
+  views.prompt("Edit note", function(body)
+    if body:match("^%s*$") then return end
+    n.text = body:gsub("[\r\n]+", " ")
+    self:build(); self:persist(true)
+  end, n.text)
+end
+
+function Review:delete_note(n)
+  for i, x in ipairs(self.doc.notes) do if x == n then table.remove(self.doc.notes, i); break end end
+  self:build(); self:update_actions(); self:persist(true)
+end
+
+function Review:general_note(text)
+  local function save(body)
+    body = body:gsub("[\r\n]+", " ")
+    if body:match("^%s*$") then return end
+    table.insert(self.doc.notes, {done = false, text = body})
+    self:build(); self:update_actions(); self:persist(true)
+  end
+  if text then save(text) else views.prompt("General note", save) end
+end
+
+function Review:copy_notes()
+  local count = self:open_notes()
+  if count == 0 then core.log("No open review notes"); return end
+  system.set_clipboard(notes.copy_text(self.doc))
+  core.log("Copied %d review note%s", count, count == 1 and "" or "s")
+end
+
+-- Opens the real file at the line in a split to the right; the review tab stays.
+function Review:open_at(row)
+  local anchor = self:anchor_row(row)
+  local ok, doc = pcall(core.open_doc, self.target.root .. "/" .. row.file.path)
+  if not ok then core.error("Cannot open %s", row.file.path); return end
+  local dv = DocView(doc)
+  local side = self.side_node
+  if side and side.active_view and core.root_view.root_node:get_node_for_view(side.active_view) == side then
+    side:add_view(dv)
+  else
+    self.side_node = core.root_view.root_node:get_node_for_view(self):split("right", dv)
+  end
+  core.set_active_view(dv)
+  local line = anchor and anchor.new or 1
+  doc:set_selection(line, 1)
+  dv:scroll_to_line(line, true, true)
 end
 
 -- ponytail: the diff renderer is reused by narrowing the view rect around
@@ -315,8 +404,31 @@ function Review:draw_row(row, x, y, w)
     renderer.draw_rect(x, y, w, h, style.background2)
     common.draw_text(style.font, row.color or style.text, row.text, nil, x + px, y, 0, h)
     if row.button then self:row_button(row, row.button, x + w - px, y, h, row.fn) end
+  elseif row.kind == "rnote" then
+    local n, g = row.note, self:gutter()
+    renderer.draw_rect(x, y, w, h, tint(style.accent, 18))
+    renderer.draw_rect(x + g - px / 2, y, math.floor(3 * SCALE), h, n.done and style.dim or n.outdated and style.warn or style.accent)
+    local gap = math.floor(4 * SCALE)
+    local right = self:row_button(row, "del", x + w - px, y, h, function() self:delete_note(n) end)
+    right = self:row_button(row, "edit", right - gap, y, h, function() self:edit_note(n) end)
+    right = self:row_button(row, n.done and "reopen" or "resolve", right - gap, y, h, function()
+      n.done = not n.done; self:build(); self:update_actions(); self:persist(true)
+    end)
+    local label = (n.done and "resolved  " or "") .. (n.outdated and "outdated  " or "") .. (n.path and "" or "general  ") .. n.text
+    core.push_clip_rect(x + g, y, math.max(0, right - x - g), h)
+    common.draw_text(style.font, n.done and style.dim or style.text, label, nil, x + g + px / 2, y, 0, h)
+    core.pop_clip_rect()
   else
     views.Text.draw_row(self, row, x, y, w)
+    local a, b = self.sel_from, self.sel_to or self.sel_from
+    if a and row.file and row.file == a.file and row.y >= math.min(a.y, b.y) and row.y <= math.max(a.y, b.y) then
+      renderer.draw_rect(x, y, w, h, tint(style.accent, 30))
+    end
+    if (row.kind == "add" or row.kind == "ctx" or row.kind == "del") and self:hovered(x, y, self:gutter(), h) then
+      local s = math.floor(h * 0.8)
+      renderer.draw_rect(x + math.floor(2 * SCALE), y + (h - s) / 2, s, s, style.accent)
+      common.draw_text(style.code_font, style.background, "+", "center", x + math.floor(2 * SCALE), y, s, h)
+    end
   end
 end
 
@@ -328,6 +440,14 @@ function Review:on_mouse_pressed(button, x, y, clicks)
     local row = self.rows[self:row_at(y - self.position.y - tb + self.scroll.y)]
     for _, b in ipairs(row and row.buttons or {}) do
       if x >= b.x1 and x < b.x2 then b.fn(); return true end
+    end
+    if row and (row.kind == "add" or row.kind == "ctx" or row.kind == "del") then
+      if clicks > 1 then self:open_at(row); return true end
+      if keymap.modkeys.shift and self.sel_from then self.sel_to = row else self.sel_from, self.sel_to = row, nil end
+      -- Clicking the line-number gutter adds a note, like GitHub's "+".
+      if x < self.position.x + self:pane_w() + self:gutter() then self:add_note(row) end
+      core.redraw = true
+      return true
     end
   end
   return in_diff(self, views.Text.on_mouse_pressed, button, x, y, clicks)
@@ -416,8 +536,11 @@ function Doc:save(...)
 end
 
 command.add(Review, {
+  ["review:add-note"] = function(v) if v.sel_from then v:add_note(v.sel_from) else core.error("Click a diff line first") end end,
+  ["review:general-note"] = function(v) v:general_note() end,
+  ["review:copy-notes"] = function(v) v:copy_notes() end,
   ["review:viewed-and-next"] = function(v) v:viewed_next() end,
 })
-keymap.add({v = "review:viewed-and-next"})
+keymap.add({c = "review:add-note", v = "review:viewed-and-next"})
 
 return M

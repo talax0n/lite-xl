@@ -138,6 +138,24 @@ function core.init(...)
     assert(not read(root .. '/.gitignore') and (read(root .. '/.git/info/exclude') or ''):find('.trex/', 1, true), '.trex not excluded')
     write(root .. '/a.lua', 'local a = 10\nlocal b = 2\nreturn a + b\n'); commit(root, 'tweak a')
     wait(function() return not rv.loading and #rv.commits == ahead() and not rv:is_viewed('a.lua') end, 'Changed file not reset to unviewed')
+    -- Line notes follow moved code; open at line.
+    local function find_row(path, text)
+      for _, row in ipairs(rv.rows) do if row.kind == 'add' and row.file.path == path and row.text == text then return row end end
+    end
+    rv:add_note(assert(find_row('a.lua', 'local b = 2'), 'Diff line for note missing'), 'rename b')
+    wait(function() return (read(root .. '/.trex/review.md') or ''):find('`a.lua:2` rename b', 1, true) end, 'Note not saved')
+    local inline = false
+    for _, row in ipairs(rv.rows) do inline = inline or (row.kind == 'rnote' and row.note.text == 'rename b') end
+    assert(inline, 'Note not shown inline')
+    rv:general_note('add tests')
+    wait(function() return (read(root .. '/.trex/review.md') or ''):find('(general) add tests', 1, true) end, 'General note not saved')
+    write(root .. '/a.lua', '-- header\nlocal a = 10\nlocal b = 2\nreturn a + b\n'); commit(root, 'header')
+    wait(function() return not rv.loading and (read(root .. '/.trex/review.md') or ''):find('`a.lua:3` rename b', 1, true) end, 'Note did not follow moved code')
+    assert(require('plugins.scm.review_notes').copy_text(rv.doc):find('a.lua:3', 1, true), 'Copy text missing note')
+    rv:open_at(find_row('a.lua', 'local b = 2'))
+    local dv = core.active_view
+    assert(dv.doc and dv.doc.abs_filename:match('a%.lua$') and dv.doc:get_selection() == 3, 'Open at line failed')
+    core.set_active_view(rv)
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
     print('PASS: nested workspace repositories, activity bar, source control sections, backlog, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)

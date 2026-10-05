@@ -168,5 +168,85 @@ do
   local wts = notes.parse_worktrees('worktree /r/main\nHEAD aaa\nbranch refs/heads/main\n\nworktree /r/wt one\nHEAD bbb\nbranch refs/heads/agent/x\nlocked busy\n\nworktree /r/det\nHEAD ccc\ndetached\nprunable gitdir file points to non-existent location\n\nworktree /r/bare\nbare\n')
   check(#wts == 4 and wts[2].root == '/r/wt one' and wts[2].branch == 'agent/x' and wts[2].locked and wts[3].detached and wts[3].prunable and not wts[3].branch and wts[4].bare, 'Worktree porcelain parsing')
 end
+-- Commit review git operations against real repositories and worktrees.
+system.mkdir = system.mkdir or function(path) return os.execute("mkdir -p '" .. path .. "'") end
+run(function()
+  local ops = require 'plugins.scm.review_ops'
+  local notes = require 'plugins.scm.review_notes'
+  local function write(path, text) local f = assert(io.open(path, 'wb')); f:write(text); f:close() end
+  local function read(path) local f = io.open(path, 'rb'); if not f then return nil end; local s = f:read('*a'); f:close(); return s end
+  local function ls(dir) local p = io.popen("ls '" .. dir .. "' 2>/dev/null"); local s = p:read('*a'); p:close(); return s end
+  local main = tmp .. '/review-main'
+  g(tmp, {'init', '--bare', '-b', 'main', 'review-remote.git'})
+  g(tmp, {'clone', 'review-remote.git', 'review-main'})
+  g(main, {'config', 'user.name', 'R'}); g(main, {'config', 'user.email', 'r@example.test'})
+  write(main .. '/a.txt', 'one\ntwo\nthree\n'); g(main, {'add', '.'}); g(main, {'commit', '-m', 'base'}); g(main, {'push', 'origin', 'main'})
+  write(main .. '/a.txt', 'one\nTWO\nthree\n'); g(main, {'commit', '-am', 'change a'})
+  local t = assert(ops.targets(main))[1]
+  check(t.main and t.base == 'origin/main' and t.ahead == 1 and t.branch == 'main', 'Review target for unpushed commits')
+  check(ops.diff(t):find('+TWO', 1, true), 'Review range diff')
+  local commits = ops.commits(t)
+  check(#commits == 1 and commits[1].subject == 'change a' and #commits[1].hash == 40, 'Review commit list')
+  check(ops.head_lines(t, 'a.txt')[2] == 'TWO' and ops.head_lines(t, 'missing.txt') == nil, 'HEAD file lines')
+  local blobs = ops.blobs(t, {'a.txt', 'gone.txt'})
+  check(#blobs['a.txt'] == 40 and blobs['gone.txt'] == '-', 'HEAD blobs')
+  local doc = notes.parse('')
+  doc.notes[1] = {done = false, path = 'a.txt', from = 2, to = 2, text = 'why caps', snapshot = 'TWO'}
+  assert(ops.save(t, doc, {['a.txt'] = blobs['a.txt']}))
+  local loaded, viewed = ops.load(t)
+  check(loaded.notes[1].text == 'why caps' and loaded.header:find('origin/main', 1, true) and viewed['a.txt'] == blobs['a.txt'], 'Review state persisted')
+  check(g(main, {'status', '--porcelain'}) == '' and not read(main .. '/.gitignore'), '.trex hidden without touching .gitignore')
+  assert(ops.save(t, doc))
+  check(select(2, read(main .. '/.git/info/exclude'):gsub('%.trex/', '')) == 1, 'Exclude entry written once')
+  -- Own fixes: only the edited file is committed.
+  write(main .. '/a.txt', 'one\nTwo\nthree\n'); write(main .. '/other.txt', 'agent wip\n')
+  check(#ops.dirty_paths(t, {'a.txt'}) == 1 and #ops.dirty_paths(t, {}) == 0 and ops.dirty_count(t) == 2, 'Dirty fix detection')
+  assert(ops.commit_fixes(t, {'a.txt'}, 'fix: address review'))
+  check(g(main, {'show', '--name-only', '--format=', 'HEAD'}) == 'a.txt\n', 'Commit fixes only includes edited files')
+  check(g(main, {'status', '--porcelain'}) == '?? other.txt\n', 'Unrelated dirty file untouched')
+  os.remove(main .. '/other.txt')
+  check(not ops.state(t).busy, 'No merge in progress')
+  write(ops.state(t).gitdir .. '/MERGE_HEAD', 'x\n'); check(ops.state(t).busy == 'merge', 'Merge in progress detected'); os.remove(ops.state(t).gitdir .. '/MERGE_HEAD')
+  -- Push empties the range and archives the review.
+  assert(ops.push(t)); assert(ops.archive(t))
+  check(ops.targets(main)[1].ahead == 0, 'Push empties range')
+  check(not read(main .. '/.trex/review.md') and not read(main .. '/.trex/viewed') and ls(main .. '/.trex/reviews'):find('%.md'), 'Review archived after push')
+  -- Agent worktree (path with a space): merge into main, then remove.
+  local wt = tmp .. '/review wt'
+  g(main, {'worktree', 'add', '-b', 'agent/x', wt})
+  write(wt .. '/b.txt', 'bee\n'); g(wt, {'add', '.'}); g(wt, {'commit', '-m', 'agent work'})
+  write(wt .. '/dirty.txt', 'left\n')
+  local targets = ops.targets(main)
+  local w = targets[2]
+  check(#targets == 2 and w.root == wt and w.branch == 'agent/x' and w.base == 'main' and w.ahead == 1 and w.dirty == 1 and not w.main and w.main_root == main, 'Worktree target')
+  check(ops.diff(w):find('+bee', 1, true), 'Worktree range from merge-base')
+  assert(ops.save(w, notes.parse('- [ ] `b.txt:1` name it\n  > bee\n')))
+  write(main .. '/a.txt', 'dirty main\n')
+  local ok, err = ops.merge(w)
+  check(not ok and err:find('uncommitted', 1, true), 'Merge refuses dirty main checkout')
+  g(main, {'checkout', '--', 'a.txt'})
+  assert(ops.merge(w)); check(read(main .. '/b.txt') == 'bee\n', 'Merge into base')
+  os.remove(wt .. '/dirty.txt')
+  assert(ops.remove(w, false))
+  check(not read(wt .. '/b.txt') and not g(main, {'branch', '--list', 'agent/x'}):find('agent', 1, true), 'Worktree and branch removed')
+  check(ls(main .. '/.trex/reviews'):find('agent%-x'), 'Worktree review archived in main checkout')
+  -- Discard an unmerged worktree; a locked one is refused.
+  local wy, wz = tmp .. '/wt-y', tmp .. '/wt-z'
+  g(main, {'worktree', 'add', '-b', 'agent/y', wy}); write(wy .. '/c.txt', 'c\n'); g(wy, {'add', '.'}); g(wy, {'commit', '-m', 'y'})
+  g(main, {'worktree', 'add', '-b', 'agent/z', wz}); g(main, {'worktree', 'lock', wz})
+  local y, z
+  for _, x in ipairs(ops.targets(main)) do if x.branch == 'agent/y' then y = x elseif x.branch == 'agent/z' then z = x end end
+  check(z.locked and not ops.remove(z, true), 'Locked worktree not removed')
+  assert(ops.remove(y, true))
+  check(not g(main, {'branch', '--list', 'agent/y'}):find('agent', 1, true) and not read(wy .. '/c.txt'), 'Discard deletes worktree and unmerged branch')
+  g(main, {'worktree', 'unlock', wz})
+  -- No upstream and no origin: no base, nothing ahead.
+  local solo = tmp .. '/review-solo'
+  assert(os.execute('mkdir -p ' .. solo))
+  g(solo, {'init', '-b', 'main'}); g(solo, {'config', 'user.name', 'R'}); g(solo, {'config', 'user.email', 'r@example.test'})
+  g(solo, {'commit', '--allow-empty', '-m', 'only'})
+  local s = ops.targets(solo)[1]
+  check(s.base == nil and s.ahead == 0, 'No upstream gives no base')
+end)
 assert(os.execute('rm -rf ' .. tmp))
 print(string.format('PASS: %d checks against real Git repositories and a native PTY', checks))

@@ -73,7 +73,7 @@ tinted rows, commit card) is reused.
 
 - Commit picker: "All changes" = combined `base..HEAD` diff (default); each
   commit by subject = that commit's `git show` (card + diff).
-- File list: ✓ viewed, ○ unviewed, ● has open notes. Click name → scroll to
+- File list: filled box = viewed, outlined box = unviewed, accent dot = open notes. Click name → scroll to
   file; click mark → toggle viewed.
 - Key `v`: mark current file viewed, jump to next unviewed.
 - Viewed files collapse to their header row.
@@ -85,7 +85,9 @@ tinted rows, commit card) is reused.
   lines then add → range note `path:42-48`. "General note" button → no anchor.
 - Notes on deleted lines anchor to the nearest new-side line, so every
   location exists in HEAD.
-- Inline under the anchored line as an accent-barred band with [edit] [del].
+- Inline under the anchored line as an accent-barred band with [resolve] [edit] [del].
+  In single-commit mode notes are listed under their file header (line numbers
+  there are the commit's, not HEAD's).
 
 ### File `.trex/review.md`
 
@@ -189,9 +191,10 @@ next target, or shows "Nothing to review".
 
 ## Refresh
 
-- Target list re-read on the same poll, so new agent worktrees appear.
-- Reload when the target's HEAD sha changes or `review.md` mtime changes, piggybacking on
-  the existing background SCM poll — no new watcher.
+- The target list is re-read whenever `scm:review` or the target picker opens, so new agent worktrees appear.
+- The review tab checks its target once per second (git-dir `HEAD`, `index`,
+  `logs/HEAD`, `review.md` mtime, and saves from TreX) and reloads on change —
+  worktree targets are not SCM repositories, so the SCM poll can't cover them.
 - Preserve scroll position, current file and viewed marks across reloads.
 
 ## Errors
@@ -205,9 +208,10 @@ next target, or shows "Nothing to review".
 | File | Role | Size |
 |---|---|---|
 | `data/plugins/scm/review_notes.lua` | pure: parse/serialize `review.md`, re-anchor, viewed state, copy text. No UI, no git. | ~120 lines |
+| `data/plugins/scm/review_ops.lua` | git operations: targets, diff, blobs, `.trex/` + exclude, fixes, push, merge, archive, remove. No UI. | ~170 lines |
 | `data/plugins/scm/review.lua` | `ReviewView`: targets, layout, file list, pickers, notes UI, actions, git calls via `git.enqueue` | ~380 lines |
 | `data/plugins/scm.lua` | `scm:review` command, sidebar button | small |
-| `data/core/keymap-macos.lua`, `data/core/keymap.lua` | keybinding | 1 line each |
+| `data/plugins/scm.lua` keymap line | `cmd+shift+r` / `ctrl+shift+r` | 1 line |
 | `scripts/tests/ui-runtime.lua` | end-to-end block | ~40 lines |
 
 `review_notes.lua` interface:

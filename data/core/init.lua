@@ -1059,8 +1059,11 @@ function core.run()
           next_step = nil -- if we've recevied an event, perform a step
         end
       else
-        system.wait_event()
-        next_step = nil -- perform a step when we're not in focus if get we an event
+        -- Unfocused: still wake for background threads (Git sync, file
+        -- watchers), but at most once a second to stay cheap.
+        if system.wait_event(math.min(math.max(1, time_to_wake), 60)) then
+          next_step = nil -- perform a step when we're not in focus if get we an event
+        end
       end
     else -- if we redrew, then make sure we only draw at most FPS/sec
       run_threads_full = 0

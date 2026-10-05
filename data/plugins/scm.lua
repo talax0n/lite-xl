@@ -412,11 +412,13 @@ core.add_thread(function()
       if repo.signature and signature ~= repo.signature then repo.dirty = true end
       repo.signature = signature
     end
-    if active and not active.worker and (active.dirty or (has_focus and now - active.last_refresh > options.refresh_interval)) then git.refresh(active) end
+    -- In the background, poll slower; .git changes are still caught every second.
+    local interval = has_focus and options.refresh_interval or math.max(15, options.refresh_interval * 3)
+    if active and not active.worker and (active.dirty or now - active.last_refresh > interval) then git.refresh(active) end
     if #git.repositories > 0 then
       index = index % #git.repositories + 1
       local repo = git.repositories[index]
-      if repo ~= active and not repo.worker and (repo.dirty or (has_focus and now - repo.last_refresh > math.max(15, options.refresh_interval * 3))) then git.refresh(repo) end
+      if repo ~= active and not repo.worker and (repo.dirty or now - repo.last_refresh > (has_focus and math.max(15, options.refresh_interval * 3) or 30)) then git.refresh(repo) end
     end
     -- Start at most one fetch per tick: the stalest repository with an upstream.
     local stalest

@@ -82,17 +82,19 @@ function Review:load()
   for _, f in ipairs(self.files) do
     if f.path == keep then self.scroll.y, self.scroll.to.y = f.row.y, f.row.y end
   end
-  self.sig = self:signature()
+  self.sig, self.sig_git = self:signature()
 end
 
 -- Cheap change detector for the target: commits, index, notes file and saves from TreX.
-function Review:signature()
-  local parts, gitdir = {M.save_tick}, self.state.gitdir or ""
-  for _, path in ipairs({gitdir .. "/HEAD", gitdir .. "/index", gitdir .. "/logs/HEAD", self.target.root .. "/.trex/review.md"}) do
-    local info = system.get_file_info(path)
-    parts[#parts + 1] = info and (info.modified .. ":" .. info.size) or "-"
+-- Returns the signature and its git part; pass `git_part` to refresh only
+-- the notes file after our own write, so a commit landing meanwhile still reloads.
+function Review:signature(git_part)
+  local function stat(path) local info = system.get_file_info(path); return info and (info.modified .. ":" .. info.size) or "-" end
+  if not git_part then
+    local gitdir = self.state.gitdir or ""
+    git_part = table.concat({M.save_tick, stat(gitdir .. "/HEAD"), stat(gitdir .. "/index"), stat(gitdir .. "/logs/HEAD")}, "|")
   end
-  return table.concat(parts, "|")
+  return git_part .. "|" .. stat(self.target.root .. "/.trex/review.md"), git_part
 end
 
 function Review:update()
@@ -153,7 +155,7 @@ function Review:build()
       add(row)
       -- Notes outside the diff hunks (or in single-commit mode) sit under the file header.
       for _, n in ipairs(by_path[file.path] or {}) do
-        if self.mode ~= "all" or n.outdated or not lines_in[file.path][n.to] then add({kind = "rnote", note = n}); placed[n] = true end
+        if self.mode ~= "all" or n.outdated or not lines_in[file.path][n.to] or self:is_viewed(file.path) then add({kind = "rnote", note = n}); placed[n] = true end
       end
     elseif not (file and self:is_viewed(file.path)) then
       add(row)
@@ -195,7 +197,7 @@ function Review:persist(doc_changed, viewed_changed)
   core.add_thread(function()
     local ok, err = ops.save(self.target, doc_changed and self.doc or nil, viewed_changed and self.viewed or nil)
     if not ok then core.error("Review: %s", err) end
-    self.sig = self:signature()
+    self.sig = (self:signature(self.sig_git))
   end)
 end
 
@@ -376,6 +378,8 @@ function Review:finish(kind, yes)
   local verb = kind == "merge" and "Merge" or "Push"
   local function run()
     core.add_thread(function()
+      -- A load in flight may re-save review.md after archive() moved it.
+      while self.loading do coroutine.yield(0.05) end
       local ok, err, conflict
       if kind == "merge" then ok, err, conflict = ops.merge(t) else ok, err = ops.push(t) end
       local repo = git.by_root[t.main_root]
@@ -409,6 +413,7 @@ function Review:discard(yes)
   local t = self.target
   local function run()
     core.add_thread(function()
+      while self.loading do coroutine.yield(0.05) end
       local ok, err = ops.remove(t, true)
       if not ok then core.error("Discard: %s", err); return end
       core.log("Discarded %s", t.branch or t.root)
@@ -416,8 +421,11 @@ function Review:discard(yes)
     end)
   end
   if yes then return run() end
-  views.confirm("Discard worktree", string.format("Delete worktree %s and branch %s with %d unmerged commit%s? This cannot be undone.",
-    t.root, t.branch or "(detached)", #self.commits, #self.commits == 1 and "" or "s"), run)
+  core.add_thread(function()
+    local n = ops.unmerged(t)
+    views.confirm("Discard worktree", string.format("Delete worktree %s and branch %s with %d unmerged commit%s? This cannot be undone.",
+      t.root, t.branch or "(detached)", n, n == 1 and "" or "s"), run)
+  end)
 end
 
 -- ponytail: the diff renderer is reused by narrowing the view rect around

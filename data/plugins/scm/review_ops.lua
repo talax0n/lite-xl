@@ -106,9 +106,13 @@ end
 -- Subset of `paths` with uncommitted changes.
 function M.dirty_paths(t, paths)
   if #paths == 0 then return {} end
-  local out = git.git(t.root, append({"status", "--porcelain", "--untracked-files=all", "--"}, paths)) or ""
-  local list = {}
-  for line in out:gmatch("[^\n]+") do list[#list + 1] = line:sub(4):match("%-> (.+)$") or line:sub(4) end
+  -- -z: plain porcelain quotes paths with spaces or quotes.
+  local out = git.git(t.root, append({"status", "--porcelain", "-z", "--untracked-files=all", "--"}, paths)) or ""
+  local list, skip = {}, false
+  for entry in out:gmatch("([^\0]*)\0") do
+    if skip then skip = false
+    else list[#list + 1] = entry:sub(4); skip = entry:match("^[RC]") ~= nil end -- rename source follows
+  end
   return list
 end
 
@@ -158,12 +162,22 @@ end
 function M.remove(t, force)
   if t.main then return nil, "The main checkout cannot be removed" end
   if t.locked then return nil, "Worktree is locked; unlock it with git worktree unlock" end
+  -- git would refuse later; check first so the review is not archived away.
+  if not force and M.dirty_count(t) > 0 then return nil, "Worktree has uncommitted changes; commit them or use Discard" end
   local ok, err = M.archive(t)
   if not ok then return nil, err end
   ok, err = git.git(t.main_root, append({"worktree", "remove"}, force and {"--force", t.root} or {t.root}))
   if not ok then return nil, err end
   if t.branch then return git.git(t.main_root, {"branch", force and "-D" or "-d", t.branch}) end
   return true
+end
+
+-- Commits on the target not reachable from any other branch or remote.
+function M.unmerged(t)
+  local args = {"rev-list", "--count", "HEAD", "--not"}
+  -- --exclude is relative to refs/heads/ when it precedes --branches.
+  if t.branch then args[#args + 1] = "--exclude=" .. t.branch end
+  return tonumber(q(t.root, append(args, {"--branches", "--remotes"}))) or 0
 end
 
 function M.state(t)

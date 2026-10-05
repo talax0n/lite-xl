@@ -149,6 +149,11 @@ function core.init(...)
     assert(inline, 'Note not shown inline')
     rv:general_note('add tests')
     wait(function() return (read(root .. '/.trex/review.md') or ''):find('(general) add tests', 1, true) end, 'General note not saved')
+    rv:toggle_viewed('a.lua', true)
+    local kept = false
+    for _, row in ipairs(rv.rows) do kept = kept or (row.kind == 'rnote' and row.note.text == 'rename b') end
+    assert(kept, 'Note hidden when its file is viewed')
+    rv:toggle_viewed('a.lua', false)
     write(root .. '/a.lua', '-- header\nlocal a = 10\nlocal b = 2\nreturn a + b\n'); commit(root, 'header')
     wait(function() return not rv.loading and (read(root .. '/.trex/review.md') or ''):find('`a.lua:3` rename b', 1, true) end, 'Note did not follow moved code')
     assert(require('plugins.scm.review_notes').copy_text(rv.doc):find('a.lua:3', 1, true), 'Copy text missing note')

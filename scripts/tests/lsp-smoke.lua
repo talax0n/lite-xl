@@ -23,7 +23,7 @@ client.open(c, doc)
 local limit = os.time() + 90
 while os.time() < limit do
   for _, co in ipairs(threads) do if coroutine.status(co) == 'suspended' then assert(coroutine.resume(co)) end end
-  for _, d in ipairs(client.diagnostics[doc.abs_filename] or {}) do
+  for _, d in ipairs(client.diagnostics_for(doc.abs_filename) or {}) do
     if d.severity == 1 and d.line1 == 2 then print('PASS: rust-analyzer reported: ' .. d.message); os.execute("rm -rf '" .. dir .. "'"); os.exit(0) end
   end
   system.sleep(20)

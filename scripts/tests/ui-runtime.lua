@@ -210,6 +210,12 @@ function core.init(...)
     wait(function() return not system.get_file_info(wy) end, 'Discard did not remove worktree', 15)
     assert(not scm.git.exec(root, 'git', {'branch', '--list', 'agent/y'}):find('agent', 1, true), 'Discarded branch not deleted')
     run(root, {'worktree', 'unlock', wz})
+    scm.history(mine)
+    local gv
+    wait(function() gv = core.active_view; return gv:is(views.Graph) and #mine.history > 2 end, 'History tab did not open')
+    keymap.on_key_pressed('down'); keymap.on_key_pressed('down'); keymap.on_key_pressed('up')
+    assert(gv.selected == 1, 'Arrow keys did not move History selection: ' .. tostring(gv.selected))
+    gv:draw()
     local syntax = require 'core.syntax'
     for file, name in pairs({['a.ts'] = 'TypeScript', ['a.tsx'] = 'TypeScript with JSX', ['a.jsx'] = 'JSX', ['a.json'] = 'JSON',
       ['a.rs'] = 'Rust', ['a.go'] = 'Go', ['a.zig'] = 'Zig', ['a.sh'] = 'Shell script', ['a.yaml'] = 'YAML', ['a.toml'] = 'TOML',

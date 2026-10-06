@@ -330,7 +330,11 @@ function Sidebar:draw_row(row, x, y, w)
       right = right - rw - 4 * SCALE
     end
     core.push_clip_rect(x, y, math.max(0, right - x), h)
-    local tx = common.draw_text(style.font, row.first and style.accent or style.text, c.subject, nil, cx + pad, y, 0, h)
+    local sx = cx + pad
+    if row.repo.unpushed and row.repo.unpushed[c.hash] then
+      local s = math.floor(6 * SCALE); renderer.draw_rect(sx, y + (h - s) / 2, s, s, style.accent); sx = sx + s + pad * 0.5
+    end
+    local tx = common.draw_text(style.font, row.first and style.accent or style.text, c.subject, nil, sx, y, 0, h)
     common.draw_text(style.font, style.dim, c.author, nil, tx + pad * 0.6, y, 0, h)
     core.pop_clip_rect()
   elseif row.kind == "more" then
@@ -624,6 +628,12 @@ commands["scm:actions"] = function()
   prompt("Source control action", function(label) if actions[label] then command.perform(actions[label]) end end, "", names)
 end
 command.add(nil, commands)
+command.add(views.Graph, {
+  ["scm:history-down"] = function(v) v:select(v.selected + 1) end,
+  ["scm:history-up"] = function(v) v:select(v.selected - 1) end,
+  ["scm:history-open"] = function(v) local c = v.repo.history[v.selected]; if c then v.on_select(c, 1) end end,
+})
+keymap.add({down = "scm:history-down", up = "scm:history-up", ["return"] = "scm:history-open"})
 keymap.add({["ctrl+shift+g"] = "scm:toggle"})
 keymap.add({[PLATFORM == "Mac OS X" and "cmd+shift+r" or "ctrl+shift+r"] = "scm:review"})
 local old_add = core.add_project
@@ -639,5 +649,5 @@ function Doc:save(...)
   for _, repo in ipairs(git.repositories) do if self.abs_filename and common.path_belongs_to(self.abs_filename, repo.root) then repo.dirty = true end end
   return result
 end
-return {git = git, open = ensure_panel, panel = function() return panel end,
+return {git = git, open = ensure_panel, panel = function() return panel end, history = history,
   change_count = function() local n = 0; for _, repo in ipairs(git.repositories) do n = n + change_count(repo) end; return n end}

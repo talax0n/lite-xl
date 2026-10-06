@@ -10,17 +10,26 @@ local function line_height() return style.code_font:get_height() + style.padding
 local Text = View:extend()
 Text.context = "session"
 local MONTHS = {Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6, Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12}
-local function relative(date)
-  local mon, d, H, M, S, y, sign, oh, om = (date or ""):match("%a+ (%a+) (%d+) (%d+):(%d+):(%d+) (%d+) ([%+%-])(%d%d)(%d%d)")
-  if not mon or not MONTHS[mon] then return date or "" end
-  local t = os.time({year = tonumber(y), month = MONTHS[mon], day = tonumber(d), hour = tonumber(H), min = tonumber(M), sec = tonumber(S)})
-  t = t + (os.time() - os.time(os.date("!*t"))) - (tonumber(oh) * 3600 + tonumber(om) * 60) * (sign == "-" and -1 or 1)
+local function ago(t)
   local s = os.time() - t
   if s < 60 then return "just now" end
   if s < 3600 then return (s // 60) .. " min ago" end
   if s < 86400 then return (s // 3600) .. (s < 7200 and " hour ago" or " hours ago") end
   if s < 86400 * 14 then return (s // 86400) .. (s < 172800 and " day ago" or " days ago") end
   return os.date("%b %d, %Y", t)
+end
+local function to_time(y, mo, d, H, Mi, S, sign, oh, om)
+  local t = os.time({year = tonumber(y), month = mo, day = tonumber(d), hour = tonumber(H), min = tonumber(Mi), sec = tonumber(S)})
+  return t + (os.time() - os.time(os.date("!*t"))) - ((tonumber(oh) or 0) * 3600 + (tonumber(om) or 0) * 60) * (sign == "-" and -1 or 1)
+end
+-- Accepts git's default date ("Tue Oct 6 15:58:00 2026 +0700") and ISO 8601 (%aI).
+local function relative(date)
+  date = date or ""
+  local mon, d, H, Mi, S, y, sign, oh, om = date:match("%a+ (%a+) (%d+) (%d+):(%d+):(%d+) (%d+) ([%+%-])(%d%d)(%d%d)")
+  if mon and MONTHS[mon] then return ago(to_time(y, MONTHS[mon], d, H, Mi, S, sign, oh, om)) end
+  local iy, imo, id, iH, iMi, iS, isign, ioh, iom = date:match("^(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)([%+%-]?)(%d*):?(%d*)")
+  if iy then return ago(to_time(iy, tonumber(imo), id, iH, iMi, iS, isign, ioh, iom)) end
+  return date
 end
 local function tint(c, a) return {c[1], c[2], c[3], a} end
 local function split_path(path) local dir, name = path:match("^(.*)/([^/]+)$"); return name or path, dir or "" end
@@ -311,6 +320,11 @@ function List:on_mouse_pressed(button, x, y, clicks)
   core.redraw = true; return true
 end
 M.List = List
+local function fit(font, text, w)
+  if font:get_width(text) <= w then return text end
+  while #text > 0 and font:get_width(text .. "…") > w do text = text:usub(1, -2) end
+  return text .. "…"
+end
 local Graph = List:extend()
 local palette = {{115, 175, 245}, {230, 150, 100}, {145, 200, 120}, {190, 135, 220}, {220, 195, 100}, {100, 200, 200}}
 local function graph_line(x1, y1, x2, y2, color)
@@ -325,14 +339,17 @@ function Graph:new(repo, git, on_commit)
   Graph.super.new(self, "History: " .. repo.name, {}, on_commit); self.repo, self.git = repo, git
 end
 function Graph:get_scrollable_size() return (#self.repo.history + 4) * line_height() end
+function Graph:get_h_scrollable_size() return 0 end
 function Graph:draw()
   self:draw_background(style.background)
   local x, y = self:get_content_offset(); x = x + style.padding.x
-  local lh, gap = line_height(), 15 * SCALE
+  local lh, gap, px = line_height(), 15 * SCALE, style.padding.x
+  local right, d = self.position.x + self.size.x - px, math.floor(6 * SCALE)
+  local unpushed = self.repo.unpushed or {}
   local first, last = math.max(1, math.floor(self.scroll.y / lh)), math.min(#self.repo.history, math.ceil((self.scroll.y + self.size.y) / lh) + 1)
   for i = first, last do
-    local c = self.repo.history[i]; local cy = y + (i - 1) * lh + lh / 2
-    if i == self.selected then renderer.draw_rect(self.position.x, cy - lh / 2, self.size.x, lh, style.line_highlight) end
+    local c = self.repo.history[i]; local ty = y + (i - 1) * lh; local cy = ty + lh / 2
+    if i == self.selected then renderer.draw_rect(self.position.x, ty, self.size.x, lh, style.line_highlight) end
     for _, edge in ipairs(c.edges) do
       local color = palette[(edge[1] - 1) % #palette + 1]
       graph_line(x + (edge[1] - 1) * gap, edge[3] and cy or cy - lh / 2, x + (edge[2] - 1) * gap, cy + lh / 2, color)
@@ -340,12 +357,32 @@ function Graph:draw()
     local color = palette[(c.lane - 1) % #palette + 1]
     if c.incoming then graph_line(x + (c.lane - 1) * gap, cy - lh / 2, x + (c.lane - 1) * gap, cy, color) end
     renderer.draw_rect(x + (c.lane - 1) * gap - 3 * SCALE, cy - 3 * SCALE, 7 * SCALE, 7 * SCALE, color)
-    local text = c.hash:sub(1, 8) .. "  " .. (c.refs ~= "" and "[" .. c.refs .. "]  " or "") .. c.subject .. (c.graph_limited and " [additional graph lanes omitted]" or "") .. "   " .. c.author .. "  " .. c.date:sub(1, 10)
-    renderer.draw_text(style.code_font, text, x + math.max(4, c.lanes) * gap, cy - style.code_font:get_height() / 2, style.text)
+    local date = relative(c.date)
+    local dx = right - style.font:get_width(date)
+    common.draw_text(style.font, style.dim, date, nil, dx, ty, 0, lh)
+    local author = fit(style.font, c.author, 140 * SCALE)
+    local ax = dx - px - style.font:get_width(author)
+    common.draw_text(style.font, style.dim, author, nil, ax, ty, 0, lh)
+    local tx = x + math.max(4, c.lanes) * gap
+    if unpushed[c.hash] then renderer.draw_rect(tx, cy - d / 2, d, d, style.accent); tx = tx + d + px / 2 end
+    tx = common.draw_text(style.code_font, style.dim, c.hash:sub(1, 8), nil, tx, ty, 0, lh) + px
+    for ref in c.refs:gmatch("[^,]+") do
+      tx = pill(style.font, (ref:gsub("^%s+", ""):gsub("^HEAD %-> ", "")), tx, ty, lh, tint(style.caret, 50), style.caret)
+    end
+    local subject = c.subject .. (c.graph_limited and "  [additional graph lanes omitted]" or "")
+    common.draw_text(style.font, style.text, fit(style.font, subject, math.max(0, ax - px - tx)), nil, tx, ty, 0, lh)
   end
   local footer = self.repo.history_done and "End of history" or #self.repo.history >= 2000 and "History display limit reached (2,000 commits)" or "Load next 100 commits"
   renderer.draw_text(style.font, footer, x, y + #self.repo.history * lh, style.accent)
   self:draw_scrollbar()
+end
+function Graph:select(i)
+  local lh = line_height()
+  self.selected = common.clamp(i, 1, math.max(1, #self.repo.history))
+  local top = (self.selected - 1) * lh
+  if top < self.scroll.to.y then self.scroll.to.y = top
+  elseif top + lh > self.scroll.to.y + self.size.y then self.scroll.to.y = top + lh - self.size.y end
+  core.redraw = true
 end
 function Graph:on_mouse_pressed(button, x, y, clicks)
   if View.on_mouse_pressed(self, button, x, y, clicks) then return true end

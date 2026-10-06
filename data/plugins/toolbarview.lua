@@ -16,6 +16,7 @@ local function scm_visible() local s = scm(); local p = s and s.panel(); return 
 local function tree() return package.loaded["plugins.treeview"] end
 local function backlog() return package.loaded["plugins.backlog"] end
 local function backlog_visible() local b = backlog(); local p = b and b.panel(); return p and p.visible end
+local function github_visible() local g = package.loaded["plugins.github"]; local p = g and g.panel(); return p and p.visible end
 
 function ToolbarView:new()
   ToolbarView.super.new(self)
@@ -31,6 +32,7 @@ function ToolbarView:new()
       badge = function() local s = scm(); return s and s.change_count() or 0 end},
     {symbol = "B", command = "backlog:toggle", name = "Backlog", active = backlog_visible,
       badge = function() local b = backlog(); return b and b.open_count() or 0 end},
+    {symbol = "g", command = "github:toggle", name = "GitHub", active = github_visible},
     {command = "terminal:toggle", name = "Terminal", text = ">_",
       active = function() local t = package.loaded["plugins.terminal"]; local p = t and t.panel and t.panel(); return p and p.visible end},
     {symbol = "P", command = "core:open-user-module", name = "Settings", bottom = true},

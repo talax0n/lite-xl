@@ -106,6 +106,39 @@ function core.init(...)
     assert(bp.visible and bp.size.x > 0 and bp.position.x > tree.position.x, 'Backlog not docked on the right')
     command.perform('backlog:toggle')
     assert(not bp.visible, 'Backlog did not hide')
+    local github = require 'plugins.github'
+    local opened
+    github.open_url = function(url) opened = url end
+    github.model = {login = 'me', fetched_at = os.time(),
+      windows = {{label = 'Today', contributions = 85, commits = 0}, {label = 'This week', contributions = 90, commits = 1},
+        {label = 'This month', contributions = 100, commits = 2}, {label = 'This year', contributions = 900, commits = 300}},
+      days = {{date = '2026-01-01', count = 3}, {date = '2026-01-02', count = 0}}, streak = {current = 1, longest = 4},
+      prs = {{title = 'Fix the thing', repo = 'o/r', url = 'https://github.com/o/r/pull/1', updated = '2026-10-06T20:00:00Z'}},
+      reviews = {}, pushes = nil}
+    github.status = {state = 'ok', at = os.time()}
+    command.perform('backlog:toggle'); command.perform('github:toggle')
+    coroutine.yield(0.1)
+    local ghp = github.panel()
+    assert(ghp.visible and ghp.size.x > 0 and ghp.position.x > tree.position.x, 'GitHub panel not docked on the right')
+    assert(bp.visible and bp.size.x > 0, 'Backlog hidden by the GitHub panel')
+    local drawn = {}
+    local draw_text = renderer.draw_text
+    renderer.draw_text = function(font, text, ...) drawn[#drawn + 1] = text; return draw_text(font, text, ...) end
+    ghp:draw()
+    renderer.draw_text = draw_text
+    local all = table.concat(drawn, '\n')
+    assert(all:find('85', 1, true) and all:find('Fix the thing', 1, true) and all:find('Unavailable', 1, true), 'GitHub panel missing content: ' .. all)
+    local hit = assert(ghp.hits[1], 'GitHub panel has no clickable rows')
+    ghp:on_mouse_pressed('left', hit.x + 5, hit.y + hit.h / 2, 1)
+    assert(opened == 'https://github.com/o/r/pull/1', 'GitHub row opened ' .. tostring(opened))
+    github.status = {state = 'auth', at = os.time()}; github.model = nil
+    drawn = {}
+    renderer.draw_text = function(font, text, ...) drawn[#drawn + 1] = text; return draw_text(font, text, ...) end
+    ghp:draw()
+    renderer.draw_text = draw_text
+    assert(table.concat(drawn, '\n'):find('gh auth login', 1, true), 'GitHub auth hint missing')
+    command.perform('github:toggle'); command.perform('backlog:toggle')
+    assert(not ghp.visible and not bp.visible, 'GitHub panel or Backlog did not hide')
     local views = require 'plugins.scm.views'
     local tv = views.Text('t', 'diff --git a/f.lua b/f.lua\n@@ -1 +1 @@\n-old\n+new\n')
     assert(#tv.files == 1 and tv.rows[#tv.rows].file == tv.files[1], 'Diff rows not linked to files')
@@ -380,7 +413,7 @@ function core.init(...)
       assert(command.map[name], name .. ' missing')
     end
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
-    print('PASS: nested workspace repositories, activity bar, source control sections, backlog, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
+    print('PASS: nested workspace repositories, activity bar, source control sections, backlog, GitHub panel, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)
   end
   core.add_thread(function()

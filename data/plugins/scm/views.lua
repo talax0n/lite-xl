@@ -356,6 +356,7 @@ local function fit(font, text, w)
   return text .. "…"
 end
 M.fit = fit
+M.relative = relative
 local Graph = List:extend()
 local palette = {{115, 175, 245}, {230, 150, 100}, {145, 200, 120}, {190, 135, 220}, {220, 195, 100}, {100, 200, 200}}
 local function graph_line(x1, y1, x2, y2, color)

@@ -67,7 +67,7 @@ function M.parse(graphql_json)
   return model
 end
 
--- `today` is a "YYYY-MM-DD" date in the calendar's own (UTC) days. Ranges are nil for a 0 streak.
+-- `today` is a "YYYY-MM-DD" date in the calendar's own days (the viewer's local time zone). Ranges are nil for a 0 streak.
 local function upto(days, today)
   local last = 0
   for i, day in ipairs(days) do if day.date <= today then last = i end end

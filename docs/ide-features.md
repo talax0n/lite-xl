@@ -91,7 +91,7 @@ Data comes from the signed-in GitHub CLI (`gh api graphql`). The panel refreshes
 from its Refresh button. Counts are contributions, the same figure as the
 profile graph, so private organization work is included. Each tile also shows
 how many of those are publicly visible commits. The heatmap and streak use
-GitHub's calendar days, which are UTC, over the last year like the profile
+GitHub's calendar days, which follow your local time zone, over the last year like the profile
 graph, so streaks carry across January 1st and the longest streak is the
 longest in the last year. Weekday totals, best day and average count this
 year only. If `gh` is missing or signed out, the

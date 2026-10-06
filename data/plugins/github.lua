@@ -30,7 +30,7 @@ local function load()
   if not out then return nil, err end
   local model, parse_err = data.parse(out)
   if not model then return nil, parse_err end
-  model.streak = data.streak(model.days, os.date("!%Y-%m-%d"))
+  model.streak = data.streak(model.days, os.date("%Y-%m-%d"))
   model.fetched_at = os.time()
   return model
 end
@@ -200,7 +200,7 @@ function GitHub:draw_charts(model, x, y, w)
   local sh = small_font:get_height()
   local cw = w - pad * 2
   if self.stats_for ~= model then
-    local today = os.date("!%Y-%m-%d")
+    local today = os.date("%Y-%m-%d")
     self.stats_for = model
     self.stats = {weekly = data.weekly(model.days, today, 26), weekdays = data.weekdays(model.days, today),
       best = data.best_day(model.days, today), average = data.average(model.days, today)}

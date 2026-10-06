@@ -135,3 +135,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 The built-in terminal uses libvterm 0.3.3, copyright Paul Evans and contributors,
 under the MIT license. The complete notice is in `src/vendor/libvterm/LICENSE`.
 Source: https://www.leonerd.org.uk/code/libvterm/.
+
+## lite-xl-plugins (syntax files `language_*.lua` from lite-xl/lite-xl-plugins)
+
+MIT License. Copyright (c) 2020-present Lite XL Team and contributors.
+Source: https://github.com/lite-xl/lite-xl-plugins
+
+## json.lua (`data/plugins/lsp/json.lua`, via lite-xl/lite-xl-lsp)
+
+MIT License. Copyright (c) 2020 rxi. Source: https://github.com/rxi/json.lua

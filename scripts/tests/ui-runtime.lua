@@ -202,6 +202,14 @@ function core.init(...)
     wait(function() return not system.get_file_info(wy) end, 'Discard did not remove worktree', 15)
     assert(not scm.git.exec(root, 'git', {'branch', '--list', 'agent/y'}):find('agent', 1, true), 'Discarded branch not deleted')
     run(root, {'worktree', 'unlock', wz})
+    local syntax = require 'core.syntax'
+    for file, name in pairs({['a.ts'] = 'TypeScript', ['a.tsx'] = 'TypeScript with JSX', ['a.jsx'] = 'JSX', ['a.json'] = 'JSON',
+      ['a.rs'] = 'Rust', ['a.go'] = 'Go', ['a.zig'] = 'Zig', ['a.sh'] = 'Shell script', ['a.yaml'] = 'YAML', ['a.toml'] = 'TOML',
+      ['Makefile'] = 'Makefile', ['a.diff'] = 'Diff', ['.env'] = '.env', ['a.scss'] = 'Sass', ['a.sql'] = 'PostgreSQL',
+      ['Dockerfile'] = 'Dockerfile'}) do
+      local got = syntax.get(workspace .. '/' .. file).name
+      assert(got == name, file .. ' highlighted as ' .. tostring(got))
+    end
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
     print('PASS: nested workspace repositories, activity bar, source control sections, backlog, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)

@@ -239,6 +239,31 @@ function core.init(...)
     local old = c.rpc
     old:kill()
     wait(function() return c.state == 'ready' and c.rpc ~= old and #lsp.line_diagnostics(tdv.doc, 1) == 1 end, 'Server not restarted after crash', 15)
+    tdv.doc:set_selection(1, 8)
+    lsp.definition(tdv.doc, 1, 8)
+    wait(function() local l, c1 = tdv.doc:get_selection(true); return core.active_view == tdv and l == 3 and c1 == 7 end, 'Definition not opened')
+    tdv.doc:set_selection(2, 1)
+    local mod = PLATFORM == 'Mac OS X' and 'cmd' or 'ctrl'
+    local cx, cy = tdv:get_line_screen_position(1, 8)
+    keymap.modkeys[mod] = true
+    keymap.on_mouse_pressed('left', cx, cy + tdv:get_line_height() / 2, 1)
+    keymap.modkeys[mod] = false
+    wait(function() local l, c1 = tdv.doc:get_selection(true); return l == 3 and c1 == 7 end, 'Modifier-click did not go to definition')
+    lsp.references(tdv.doc, 1, 8)
+    wait(function() return core.active_view.name == 'References' and #core.active_view.rows == 3 end, 'References tab missing')
+    assert(core.active_view.rows[3].target.line == 3, 'Reference row target wrong')
+    core.set_active_view(tdv)
+    local text
+    lsp.hover(tdv.doc, 1, 8, function(t) text = t end)
+    wait(function() return text end, 'Hover not answered')
+    assert(text:find('answer is not a question', 1, true) and text:find('const answer: number', 1, true), 'Hover text: ' .. text)
+    tdv.doc:set_selection(3, 1)
+    lsp.next_problem(tdv, 1)
+    assert(select(1, tdv.doc:get_selection()) == 1 and lsp.hover_state().text:find('fake(7)', 1, true), 'Next problem did not wrap to line 1')
+    for _, name in ipairs({'lsp:goto-definition', 'lsp:goto-definition-at-mouse', 'lsp:find-references', 'lsp:hover',
+      'lsp:document-symbols', 'lsp:workspace-symbols', 'lsp:next-problem', 'lsp:previous-problem'}) do
+      assert(command.map[name], name .. ' missing')
+    end
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
     print('PASS: nested workspace repositories, activity bar, source control sections, backlog, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)

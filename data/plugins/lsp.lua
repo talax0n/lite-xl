@@ -339,4 +339,163 @@ command.add(function() local d = active_doc(); return d ~= nil, d end, {
 })
 keymap.add({[PLATFORM == "Mac OS X" and "cmd+shift+m" or "ctrl+shift+m"] = "lsp:problems"})
 
+-- Navigation.
+local function target(loc)
+  return {path = util.uri_to_path(loc.uri), line = loc.line + 1, character = loc.character,
+    end_character = loc.end_line == loc.line and loc.end_character or nil}
+end
+
+local function pick(title, items, fn)
+  core.command_view:enter(title, {
+    submit = function(_, item) if item then fn(item) end end,
+    suggest = function(text)
+      local out = {}
+      for _, item in ipairs(items) do if item.text:lower():find(text:lower(), 1, true) then out[#out + 1] = item end end
+      return out
+    end,
+  })
+end
+
+local function request(doc, method, params, fn)
+  if not doc.lsp then return end
+  M.flush(doc)
+  client.request(doc.lsp, method, params, function(result, err)
+    if err then core.log("%s: %s", doc.lsp.spec.label, err) else fn(result) end
+  end)
+end
+
+function M.definition(doc, line, col)
+  request(doc, "textDocument/definition", M.position(doc, line, col), function(result)
+    local locs = util.locations(result)
+    if #locs == 0 then return core.log("No definition found") end
+    if #locs == 1 then return M.jump(target(locs[1])) end
+    local items = {}
+    for _, l in ipairs(locs) do
+      local t = target(l)
+      items[#items + 1] = {text = M.rel(t.path) .. ":" .. t.line, target = t}
+    end
+    pick("Definition", items, function(item) M.jump(item.target) end)
+  end)
+end
+
+local function file_lines(path)
+  for _, d in ipairs(core.docs) do if d.abs_filename == path then return d.lines end end
+  local lines, fp = {}, io.open(path, "rb")
+  if fp then for l in fp:lines() do lines[#lines + 1] = l end; fp:close() end
+  return lines
+end
+
+function M.references(doc, line, col)
+  local params = M.position(doc, line, col)
+  params.context = {includeDeclaration = true}
+  request(doc, "textDocument/references", params, function(result)
+    local locs = util.locations(result)
+    if #locs == 0 then return core.log("No references found") end
+    local rows, last = {}, nil
+    for _, l in ipairs(locs) do
+      local t = target(l)
+      if t.path ~= last then
+        last = t.path
+        rows[#rows + 1] = {{style.accent, M.rel(t.path)}}
+      end
+      local text = (file_lines(t.path)[t.line] or ""):gsub("^%s+", ""):gsub("%s+$", "")
+      rows[#rows + 1] = {target = t, indent = style.padding.x, {style.dim, tostring(t.line)}, {style.text, text}}
+    end
+    views.show(views.List("References", function() return rows end, nil, M.jump))
+  end)
+end
+
+function M.document_symbols(doc)
+  local uri = util.path_to_uri(doc.abs_filename)
+  request(doc, "textDocument/documentSymbol", {textDocument = {uri = uri}}, function(result)
+    local items = {}
+    for _, s in ipairs(util.symbols(result, uri)) do
+      items[#items + 1] = {text = s.name, info = s.detail, target = target({uri = s.uri, line = s.line, character = s.character})}
+    end
+    if #items == 0 then return core.log("No symbols in this file") end
+    pick("Symbol in file", items, function(item) M.jump(item.target) end)
+  end)
+end
+
+local function any_client()
+  local d = active_doc()
+  if d then return d.lsp end
+  for _, c in pairs(client.clients) do if c.state == "ready" then return c end end
+end
+
+function M.workspace_symbols()
+  local c = any_client()
+  if not c then return end
+  core.command_view:enter("Symbol in project", {submit = function(query)
+    client.request(c, "workspace/symbol", {query = query}, function(result, err)
+      if err then return core.log("%s: %s", c.spec.label, err) end
+      local items = {}
+      for _, s in ipairs(util.symbols(result)) do
+        local t = target({uri = s.uri, line = s.line, character = s.character})
+        items[#items + 1] = {text = s.name, info = M.rel(t.path) .. ":" .. t.line, target = t}
+      end
+      if #items == 0 then return core.log("No symbols match %q", query) end
+      pick("Symbol in project", items, function(item) M.jump(item.target) end)
+    end)
+  end})
+end
+
+function M.next_problem(dv, dir)
+  local list = client.diagnostics[dv.doc.abs_filename] or {}
+  if #list == 0 then return end
+  local line, col = dv.doc:get_selection()
+  local found
+  if dir > 0 then
+    for _, d in ipairs(list) do if d.line1 > line or (d.line1 == line and d.col1 > col) then found = d; break end end
+    found = found or list[1]
+  else
+    for i = #list, 1, -1 do
+      local d = list[i]
+      if d.line1 < line or (d.line1 == line and d.col1 < col) then found = d; break end
+    end
+    found = found or list[#list]
+  end
+  dv.doc:set_selection(found.line1, found.col1)
+  dv:scroll_to_line(found.line1, true, true)
+  local x, y = dv:get_line_screen_position(found.line1, found.col1)
+  M.set_hover({view = dv, x = x, y = y, t = 0, asked = true, text = util.describe(found)})
+end
+
+local function caret_hover(dv)
+  local line, col = dv.doc:get_selection()
+  local x, y = dv:get_line_screen_position(line, col)
+  local h = {view = dv, x = x, y = y, t = 0, asked = true}
+  M.set_hover(h)
+  M.hover(dv.doc, line, col, function(text) if M.hover_state() == h and text ~= "" then h.text = text; core.redraw = true end end)
+end
+
+command.add(function(...) local v = core.active_view; return v:is(DocView) and v.doc.lsp ~= nil, v, ... end, {
+  ["lsp:goto-definition"] = function(dv) M.definition(dv.doc, dv.doc:get_selection()) end,
+  ["lsp:goto-definition-at-mouse"] = function(dv, x, y)
+    local line, col = dv:resolve_screen_position(x, y)
+    dv.doc:set_selection(line, col)
+    M.definition(dv.doc, line, col)
+  end,
+  ["lsp:find-references"] = function(dv) M.references(dv.doc, dv.doc:get_selection()) end,
+  ["lsp:hover"] = caret_hover,
+  ["lsp:document-symbols"] = function(dv) M.document_symbols(dv.doc) end,
+  ["lsp:next-problem"] = function(dv) M.next_problem(dv, 1) end,
+  ["lsp:previous-problem"] = function(dv) M.next_problem(dv, -1) end,
+})
+command.add(function() return any_client() ~= nil end, {
+  ["lsp:workspace-symbols"] = function() M.workspace_symbols() end,
+})
+
+local mac = PLATFORM == "Mac OS X"
+keymap.add({
+  ["f12"] = "lsp:goto-definition",
+  ["shift+f12"] = "lsp:find-references",
+  ["f8"] = "lsp:next-problem",
+  ["shift+f8"] = "lsp:previous-problem",
+  [mac and "cmd+i" or "ctrl+shift+i"] = "lsp:hover",
+  [mac and "cmd+shift+o" or "ctrl+shift+o"] = "lsp:document-symbols",
+  [mac and "cmd+t" or "ctrl+t"] = "lsp:workspace-symbols",
+  [mac and "cmd+1lclick" or "ctrl+1lclick"] = "lsp:goto-definition-at-mouse",
+})
+
 return M

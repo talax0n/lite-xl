@@ -283,7 +283,7 @@ local function active_doc()
 end
 
 local counts_item = core.status_view:add_item({
-  name = "lsp:diagnostics", alignment = core.status_view.Item.LEFT, command = "lsp:problems",
+  name = "lsp:diagnostics", alignment = core.status_view.Item.LEFT, command = "lsp:problems", position = 1,
   predicate = function() return active_doc() ~= nil end, get_item = function() return {} end,
 })
 counts_item.on_draw = function(x, y, h, hovered, calc_only)
@@ -304,7 +304,7 @@ counts_item.on_draw = function(x, y, h, hovered, calc_only)
 end
 
 core.status_view:add_item({
-  name = "lsp:server", alignment = core.status_view.Item.RIGHT, command = "lsp:server-action",
+  name = "lsp:server", alignment = core.status_view.Item.LEFT, command = "lsp:server-action", position = 2,
   predicate = function() return active_doc() ~= nil end,
   get_item = function()
     local c = active_doc().lsp

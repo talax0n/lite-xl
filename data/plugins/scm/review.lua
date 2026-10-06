@@ -209,7 +209,6 @@ function Review:update_actions()
     return
   end
   a[#a + 1] = {text = (t.branch or "detached") .. " vs " .. (t.base or "?"), fn = function() self:pick_target() end}
-  a[#a + 1] = {text = self.mode == "all" and "All changes" or self.mode:sub(1, 8), fn = function() self:pick_commit() end}
   a[#a + 1] = {text = "Note", fn = function() self:general_note() end}
   a[#a + 1] = {text = "Copy notes", fn = function() self:copy_notes() end}
   if #self.all_rows > 0 and t.branch and not self.state.busy then
@@ -269,15 +268,6 @@ function Review:step(d)
   if i + d > #t.repo.history then
     if not t.repo.history_done then git.history(t.repo, go) end
   else go() end
-end
-
-function Review:pick_commit()
-  local labels, by = {"All changes"}, {["All changes"] = "all"}
-  for _, c in ipairs(self.commits) do
-    local label = c.hash:sub(1, 8) .. "  " .. c.subject
-    labels[#labels + 1] = label; by[label] = c.hash
-  end
-  views.prompt("Show", function(label) if by[label] then self.mode = by[label]; self:reload() end end, "", labels)
 end
 
 function Review:pick_target()
@@ -493,44 +483,79 @@ function Review:draw()
   self:draw_pane()
 end
 
+-- Left pane rows: in a review, the commit list (it filters the diff) above the files.
+function Review:pane_rows()
+  local rows = {}
+  if not self.target.commit and #self.commits > 0 then
+    rows[1] = {kind = "heading", text = "COMMITS"}
+    rows[2] = {kind = "commit", mode = "all", text = "All changes"}
+    for _, c in ipairs(self.commits) do rows[#rows + 1] = {kind = "commit", mode = c.hash, text = c.subject, time = c.time} end
+    rows[#rows + 1] = {kind = "heading", text = "FILES"}
+  end
+  for _, f in ipairs(self.files) do rows[#rows + 1] = {kind = "file", file = f} end
+  return rows
+end
+
 function Review:draw_pane()
   local x, y, w, h = self.position.x, self.position.y, self:pane_w(), self.size.y
   local tb, lh, px = self:toolbar_height(), pane_lh(), style.padding.x
   local line = math.max(1, math.floor(SCALE))
+  local read_only = self.target.commit
   renderer.draw_rect(x, y, w, h, style.background2)
   renderer.draw_rect(x + w - line, y, line, h, style.divider)
-  local done = 0
-  for _, f in ipairs(self.files) do if self:is_viewed(f.path) then done = done + 1 end end
-  local open = self:open_notes()
-  common.draw_text(style.font, (done == #self.files and #self.files > 0) and style.good or style.text,
-    string.format("%d/%d reviewed  ·  %d note%s", done, #self.files, open, open == 1 and "" or "s"), nil, x + px, y, 0, tb)
+  local header, color
+  if read_only then header, color = #self.files .. (#self.files == 1 and " file changed" or " files changed"), style.text
+  else
+    local done = 0
+    for _, f in ipairs(self.files) do if self:is_viewed(f.path) then done = done + 1 end end
+    local open = self:open_notes()
+    header = string.format("%d/%d reviewed  ·  %d note%s", done, #self.files, open, open == 1 and "" or "s")
+    color = (done == #self.files and #self.files > 0) and style.good or style.text
+  end
+  common.draw_text(style.font, color, header, nil, x + px, y, 0, tb)
   renderer.draw_rect(x, y + tb - line, w, line, style.divider)
   core.push_clip_rect(x, y + tb, w, h - tb)
   local box, current = math.floor(10 * SCALE), self:current_file()
-  for i, f in ipairs(self.files) do
+  for i, row in ipairs(self:pane_rows()) do
     local ry = y + tb + (i - 1) * lh - (self.pane_scroll or 0)
     if ry + lh >= y + tb and ry <= y + h then
-      if f == current then renderer.draw_rect(x, ry, w, lh, style.selection)
-      elseif self:hovered(x, ry, w, lh) then renderer.draw_rect(x, ry, w, lh, style.line_highlight) end
-      local bx, by = x + px, ry + (lh - box) / 2
-      local viewed = self:is_viewed(f.path)
-      if viewed then renderer.draw_rect(bx, by, box, box, style.good)
+      if row.kind == "heading" then
+        common.draw_text(style.font, style.dim, row.text, nil, x + px, ry, 0, lh)
+      elseif row.kind == "commit" then
+        local active = row.mode == self.mode
+        if active then renderer.draw_rect(x, ry, w, lh, style.selection)
+        elseif self:hovered(x, ry, w, lh) then renderer.draw_rect(x, ry, w, lh, style.line_highlight) end
+        local right = x + w - px
+        if row.time then right = right - style.font:get_width(row.time); common.draw_text(style.font, style.dim, row.time, nil, right, ry, 0, lh) end
+        core.push_clip_rect(x + px, ry, math.max(0, right - x - px * 1.5), lh)
+        common.draw_text(style.font, active and style.accent or style.text, row.text, nil, x + px, ry, 0, lh)
+        core.pop_clip_rect()
       else
-        renderer.draw_rect(bx, by, box, line, style.dim); renderer.draw_rect(bx, by + box - line, box, line, style.dim)
-        renderer.draw_rect(bx, by, line, box, style.dim); renderer.draw_rect(bx + box - line, by, line, box, style.dim)
+        local f = row.file
+        if f == current then renderer.draw_rect(x, ry, w, lh, style.selection)
+        elseif self:hovered(x, ry, w, lh) then renderer.draw_rect(x, ry, w, lh, style.line_highlight) end
+        local nx, viewed = x + px, self:is_viewed(f.path)
+        if not read_only then
+          local bx, by = x + px, ry + (lh - box) / 2
+          if viewed then renderer.draw_rect(bx, by, box, box, style.good)
+          else
+            renderer.draw_rect(bx, by, box, line, style.dim); renderer.draw_rect(bx, by + box - line, box, line, style.dim)
+            renderer.draw_rect(bx, by, line, box, style.dim); renderer.draw_rect(bx + box - line, by, line, box, style.dim)
+          end
+          nx = bx + box + px / 2
+        end
+        local stat = "+" .. f.adds .. " −" .. f.dels
+        local right = x + w - px - style.font:get_width(stat)
+        common.draw_text(style.font, style.dim, stat, nil, right, ry, 0, lh)
+        if self:open_notes(f.path) > 0 then
+          local d = math.floor(6 * SCALE)
+          right = right - d - px / 2
+          renderer.draw_rect(right, ry + (lh - d) / 2, d, d, style.accent)
+        end
+        core.push_clip_rect(nx, ry, math.max(0, right - nx - px / 2), lh)
+        common.draw_text(style.font, viewed and style.dim or style.text, f.path:match("[^/]+$") or f.path, nil, nx, ry, 0, lh)
+        core.pop_clip_rect()
       end
-      local stat = "+" .. f.adds .. " −" .. f.dels
-      local right = x + w - px - style.font:get_width(stat)
-      common.draw_text(style.font, style.dim, stat, nil, right, ry, 0, lh)
-      if self:open_notes(f.path) > 0 then
-        local d = math.floor(6 * SCALE)
-        right = right - d - px / 2
-        renderer.draw_rect(right, ry + (lh - d) / 2, d, d, style.accent)
-      end
-      local nx = bx + box + px / 2
-      core.push_clip_rect(nx, ry, math.max(0, right - nx - px / 2), lh)
-      common.draw_text(style.font, viewed and style.dim or style.text, f.path:match("[^/]+$") or f.path, nil, nx, ry, 0, lh)
-      core.pop_clip_rect()
     end
   end
   core.pop_clip_rect()
@@ -605,10 +630,12 @@ end
 function Review:pane_pressed(x, y)
   local tb = self:toolbar_height()
   if y < self.position.y + tb then return true end
-  local f = self.files[math.floor((y - self.position.y - tb + (self.pane_scroll or 0)) / pane_lh()) + 1]
-  if not f then return true end
-  if x < self.position.x + style.padding.x * 1.5 + math.floor(10 * SCALE) then self:toggle_viewed(f.path)
-  else self.scroll.to.y = f.row.y end
+  local row = self:pane_rows()[math.floor((y - self.position.y - tb + (self.pane_scroll or 0)) / pane_lh()) + 1]
+  if not row or row.kind == "heading" then return true end
+  if row.kind == "commit" then
+    if row.mode ~= self.mode then self.mode = row.mode; self.scroll.to.y = 0; self:reload() end
+  elseif not self.target.commit and x < self.position.x + style.padding.x * 1.5 + math.floor(10 * SCALE) then self:toggle_viewed(row.file.path)
+  else self.scroll.to.y = row.file.row.y end
   core.redraw = true
   return true
 end
@@ -617,7 +644,7 @@ function Review:on_mouse_moved(x, y, ...) return in_diff(self, views.Text.on_mou
 function Review:on_mouse_released(...) return in_diff(self, View.on_mouse_released, ...) end
 function Review:on_mouse_wheel(dy, dx)
   if self.mouse_x and self.mouse_x < self.position.x + self:pane_w() then
-    local max = math.max(0, #self.files * pane_lh() - (self.size.y - self:toolbar_height()))
+    local max = math.max(0, #self:pane_rows() * pane_lh() - (self.size.y - self:toolbar_height()))
     self.pane_scroll = common.clamp((self.pane_scroll or 0) - dy * pane_lh() * 3, 0, max)
     core.redraw = true
     return true

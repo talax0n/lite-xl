@@ -43,9 +43,9 @@ end
 function M.diff(t) return git.git(t.root, {"diff", "--no-ext-diff", "--no-textconv", t.base .. "...HEAD", "--"}) end
 
 function M.commits(t)
-  local out = git.git(t.root, {"log", "--format=%H%x00%s", t.base .. "..HEAD"}) or ""
+  local out = git.git(t.root, {"log", "--format=%H%x00%s%x00%ar", t.base .. "..HEAD"}) or ""
   local list = {}
-  for hash, subject in out:gmatch("(%x+)\0([^\n]*)") do list[#list + 1] = {hash = hash, subject = subject} end
+  for hash, subject, time in out:gmatch("(%x+)\0([^\0\n]*)\0([^\n]*)") do list[#list + 1] = {hash = hash, subject = subject, time = (time:gsub(" ago$", ""))} end
   return list
 end
 

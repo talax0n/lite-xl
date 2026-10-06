@@ -44,8 +44,13 @@ stashes, remotes, worktrees, and file history. Discard, amend, revert, cherry-pi
 and rebase actions display confirmations for their changes.
 
 **Graph** loads 100 commits at a time, with parent edges, merge lanes, hashes,
-branch/tag labels, messages, authors, and dates. Select a commit to inspect its
-patch, compare it with HEAD, copy its hash, revert it, or cherry-pick it. Click
+branch/tag labels, messages, authors, and dates. Click a commit, or move with
+Up/Down and press Enter, to open it in the commit tab: changed files on the left,
+its message and syntax-colored diff on the right, and Copy hash, Compare with
+HEAD, Revert, Cherry-pick and GitHub in the toolbar. **[** and **]** (or
+Previous/Next) step to the newer and older commit. A dot marks commits not
+pushed yet. T3 Code checkpoint commits (`refs/t3/*`) are hidden; **Toggle
+checkpoints** shows them. Click
 **Load next 100 commits** at the bottom for another page. The view keeps at most
 2,000 commits and 32 simultaneous graph lanes per repository. A notice marks
 commits whose additional lanes cannot be displayed. Open history again after changing branches or
@@ -198,8 +203,8 @@ t3code, Claude Code and others are found through `git worktree list`).
 
 The left pane lists changed files. Click the box or press **v** to mark a file
 viewed and jump to the next one; viewed files collapse, and become unviewed
-again when a new commit changes them. The toolbar switches between all changes
-and a single commit.
+again when a new commit changes them. The **Commits** list at the top of the
+left pane filters the diff to one commit; **All changes** shows the whole range.
 
 Click a line number (or select a line and press **c**; Shift+click selects a
 range) to leave a note. Notes are saved to `.trex/review.md` in the checkout,

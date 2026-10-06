@@ -216,6 +216,17 @@ function core.init(...)
     wait(function() return not system.get_file_info(wy) end, 'Discard did not remove worktree', 15)
     assert(not scm.git.exec(root, 'git', {'branch', '--list', 'agent/y'}):find('agent', 1, true), 'Discarded branch not deleted')
     run(root, {'worktree', 'unlock', wz})
+    write(wz .. '/f.lua', 'return 6\n'); commit(wz, 'z more')
+    for _, t in ipairs(assert(require('plugins.scm.review_ops').targets(root))) do if t.branch == 'agent/z' then rv:retarget(t) end end
+    wait(function() return not rv.loading and rv.target.branch == 'agent/z' and #rv.files == 2 end, 'Worktree z with two commits not opened')
+    local pane = rv:pane_rows()
+    local idx
+    for i, r in ipairs(pane) do if r.kind == 'commit' and r.text == 'z more' then idx = i end end
+    assert(pane[1].kind == 'heading' and pane[2].mode == 'all' and idx, 'Commit list missing from review pane')
+    local plh = style.font:get_height() + style.padding.y
+    rv:pane_pressed(rv.position.x + 20, rv.position.y + rv:toolbar_height() + (idx - 1) * plh + 2)
+    wait(function() return not rv.loading and #rv.files == 1 and rv.files[1].path == 'f.lua' end, 'Pane commit click did not filter the diff')
+    for _, a in ipairs(rv.actions) do assert(a.text ~= 'All changes', 'Old commit picker still in toolbar') end
     scm.history(mine)
     local gv
     wait(function() gv = core.active_view; return gv:is(views.Graph) and #mine.history > 2 end, 'History tab did not open')
@@ -241,6 +252,7 @@ function core.init(...)
     local reviews_after = 0
     for _, v in ipairs(core.root_view.root_node:get_children()) do if v:is(review.Review) then reviews_after = reviews_after + 1 end end
     assert(reviews_after == reviews_before + 1, 'Commit tab not reused: ' .. reviews_before .. ' -> ' .. reviews_after)
+    assert(rv.target.branch == 'agent/z' and not rv.target.commit and rv.mode ~= 'all', 'Review tab state changed by commit browsing')
     local syntax = require 'core.syntax'
     for file, name in pairs({['a.ts'] = 'TypeScript', ['a.tsx'] = 'TypeScript with JSX', ['a.jsx'] = 'JSX', ['a.json'] = 'JSON',
       ['a.rs'] = 'Rust', ['a.go'] = 'Go', ['a.zig'] = 'Zig', ['a.sh'] = 'Shell script', ['a.yaml'] = 'YAML', ['a.toml'] = 'TOML',

@@ -123,7 +123,8 @@ function core.init(...)
     assert(github.status.state == 'error', 'GitHub fetch whose parse throws ended in ' .. github.status.state)
     github.model = {login = 'me', fetched_at = os.time(),
       windows = {{label = 'Today', contributions = 85, commits = 0}, {label = 'This week', contributions = 90, commits = 1},
-        {label = 'This month', contributions = 100, commits = 2}, {label = 'This year', contributions = 6183, commits = 1486}},
+        {label = 'This month', contributions = 100, commits = 2}, {label = 'This year', contributions = 6183, commits = 1486,
+        kinds = {commits = 1486, prs = 10, issues = 5, reviews = 2, private = 4680}}},
       days = {{date = '2026-01-01', count = 3}, {date = '2026-01-02', count = 0}}, streak = {current = 1, longest = 4, current_from = '2026-01-01', current_to = '2026-01-01', longest_from = '2025-08-25', longest_to = '2025-08-28'}}
     github.status = {state = 'ok', at = os.time()}
     command.perform('backlog:toggle'); command.perform('github:toggle')
@@ -138,7 +139,9 @@ function core.init(...)
     renderer.draw_text = draw_text
     local all = table.concat(drawn, '\n')
     assert(all:find('85', 1, true) and all:find('6,183', 1, true) and all:find('\n1,486 commits', 1, true) and all:find('0 commits\n', 1, true)
-      and all:find('Total Contributions\nJan 1 - Present', 1, true) and all:find('Current Streak\nJan 1 - Jan 1', 1, true) and all:find('Longest Streak\nAug 25 - Aug 28', 1, true), 'GitHub panel missing content: ' .. all)
+      and all:find('Total Contributions\nJan 1 - Present', 1, true) and all:find('Current Streak\nJan 1 - Jan 1', 1, true) and all:find('Longest Streak\nAug 25 - Aug 28', 1, true)
+      and all:find('Private\n4,680', 1, true) and all:find('Max 3', 1, true) and all:find('Thu\n3', 1, true)
+      and all:find('Best day 3 on Jan 1', 1, true) and all:find('Avg 1.5/day', 1, true), 'GitHub panel missing content: ' .. all)
     github.status = {state = 'auth', at = os.time()}; github.model = nil
     drawn = {}
     renderer.draw_text = function(font, text, ...) drawn[#drawn + 1] = text; return draw_text(font, text, ...) end

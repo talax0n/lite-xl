@@ -417,6 +417,11 @@ do
   check(s.current == 0 and s.longest == 2 and s.current_from == nil and s.current_to == nil and s.longest_to == '2026-01-02', 'Gap resets the current streak')
   s = gh.streak(days({0, 0}), '2026-01-02')
   check(s.longest == 0 and s.longest_from == nil, 'No streak has no range')
+  check(table.concat(gh.weekly(days({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0}), '2026-01-10', 3), ',') == '0,6,49', 'Weekly totals are 7-day buckets ending today, oldest first')
+  check(table.concat(gh.weekdays(days({1, 2, 3, 4, 5, 6, 7, 8, 9}), '2026-01-08'), ',') == '5,6,7,9,2,3,4', 'Weekday totals run Monday to Sunday up to today')
+  local best = gh.best_day(days({1, 5, 2, 5, 9}), '2026-01-04')
+  check(best.date == '2026-01-02' and best.count == 5, 'Best day is the first busiest day up to today')
+  check(gh.average(days({1, 2, 3, 10}), '2026-01-03') == 2 and gh.average({}, '2026-01-03') == 0, 'Average per day up to today')
   check(gh.short_date('2026-08-25') == 'Aug 25' and gh.short_date('2026-01-01') == 'Jan 1', 'GitHub short dates')
   local function window(c, r) return string.format('{"totalCommitContributions":%d,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":%d}', c, r) end
   local graphql = '{"data":{"viewer":{"login":"me","w1":' .. window(0, 85) .. ',"w2":' .. window(2, 100) .. ',"w3":' .. window(3, 200)
@@ -426,6 +431,8 @@ do
   check(model.login == 'me' and model.windows[1].label == 'Today' and model.windows[1].contributions == 88 and model.windows[1].commits == 0, 'GitHub contributions include restricted ones')
   check(model.windows[4].contributions == 307 and model.windows[4].commits == 4, 'GitHub year totals and commit counts')
   check(#model.days == 3 and model.days[3].date == '2026-01-03' and model.days[3].count == 5, 'GitHub calendar flattened oldest first')
+  local k = model.windows[4].kinds
+  check(k.commits == 4 and k.prs == 1 and k.issues == 1 and k.reviews == 1 and k.private == 300, 'GitHub keeps the contribution kinds')
   check(model.prs == nil and model.reviews == nil and model.pushes == nil and not gh.query(w):find('pullRequests', 1, true), 'GitHub no longer fetches PR, review or push lists')
   check(not gh.parse('{"errors":[{"message":"Bad credentials"}]}'), 'GitHub API errors fail the parse')
   local holes = '{"data":{"viewer":{"login":"me","w4":{"contributionCalendar":{"weeks":[null,{"contributionDays":[null,{"date":"2026-01-01"},{"date":"2026-01-02","contributionCount":2}]}]}}}}}'

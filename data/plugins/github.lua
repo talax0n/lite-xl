@@ -86,11 +86,6 @@ local function levels(days)
   return {q(0.25), q(0.5), q(0.75)}
 end
 
-local function weekday(date)
-  local y, m, d = date:match("(%d+)-(%d+)-(%d+)")
-  return os.date("*t", os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12})).wday - 1
-end
-
 -- ponytail: rounded corners and the ring are rows and dots of draw_rect, the renderer has no paths.
 local function rounded(x, y, w, h, r, color)
   for j = 0, r - 1 do
@@ -180,7 +175,7 @@ function GitHub:draw_heatmap(model, x, y, w)
   if self.levels_for ~= model then self.levels, self.levels_for = levels(days), model end
   local step = math.max(2, math.floor((w - style.padding.x * 2) / 53))
   local size = math.max(1, step - math.max(1, math.floor(SCALE)))
-  local offset = weekday(days[1].date)
+  local offset = data.weekday(days[1].date)
   for i, day in ipairs(days) do
     local slot = i - 1 + offset
     local level = 0
@@ -189,6 +184,81 @@ function GitHub:draw_heatmap(model, x, y, w)
     renderer.draw_rect(x + style.padding.x + (slot // 7) * step, y + (slot % 7) * step, size, size, color)
   end
   return y + step * 7 + style.padding.y
+end
+
+local KINDS = {{"commits", "Commits", GREENS[4]}, {"prs", "Pull requests", BLUE}, {"issues", "Issues", FLAME},
+  {"reviews", "Reviews", PURPLE}, {"private", "Private", {139, 148, 158, 255}}}
+local WEEKDAYS = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+
+local function title(text, x, y)
+  common.draw_text(style.font, style.accent, text, nil, x + style.padding.x, y, 0, lh())
+  return y + lh()
+end
+
+function GitHub:draw_charts(model, x, y, w)
+  local pad, py = style.padding.x, style.padding.y
+  local sh = small_font:get_height()
+  local cw = w - pad * 2
+  if self.stats_for ~= model then
+    local today = os.date("!%Y-%m-%d")
+    self.stats_for = model
+    self.stats = {weekly = data.weekly(model.days, today, 26), weekdays = data.weekdays(model.days, today),
+      best = data.best_day(model.days, today), average = data.average(model.days, today)}
+  end
+  local st = self.stats
+
+  local kinds, total = model.windows[4] and model.windows[4].kinds, 0
+  if kinds then
+    y = title("CONTRIBUTION TYPES", x, y)
+    for _, k in ipairs(KINDS) do total = total + kinds[k[1]] end
+    local bx, bh = x + pad, math.floor(10 * SCALE)
+    if total == 0 then renderer.draw_rect(bx, y, cw, bh, tint(style.dim, 48)) end
+    for _, k in ipairs(KINDS) do
+      local kw = total > 0 and math.floor(cw * kinds[k[1]] / total + 0.5) or 0
+      renderer.draw_rect(bx, y, math.min(kw, x + pad + cw - bx), bh, k[3])
+      bx = bx + kw
+    end
+    y = y + bh + py
+    local col = (cw - pad) / 2
+    for i, k in ipairs(KINDS) do
+      local lx, ly = x + pad + ((i - 1) % 2) * (col + pad), y + ((i - 1) // 2) * sh
+      local dot = math.floor(sh / 2)
+      renderer.draw_rect(lx, ly + (sh - dot) / 2, dot, dot, k[3])
+      common.draw_text(small_font, style.text, k[2], nil, lx + dot * 2, ly, 0, sh)
+      common.draw_text(small_font, style.dim, data.thousands(kinds[k[1]]), "right", lx, ly, col, sh)
+    end
+    y = y + math.ceil(#KINDS / 2) * sh + py
+  end
+
+  y = title("WEEKLY ACTIVITY", x, y)
+  local max = 0
+  for _, n in ipairs(st.weekly) do max = math.max(max, n) end
+  common.draw_text(small_font, style.dim, "Max " .. data.thousands(max), "right", x + pad, y - lh(), cw, lh())
+  local ch, step = math.floor(60 * SCALE), cw / #st.weekly
+  for i, n in ipairs(st.weekly) do
+    local bh = max > 0 and math.max(n > 0 and 1 or 0, math.floor(ch * n / max + 0.5)) or 0
+    renderer.draw_rect(math.floor(x + pad + (i - 1) * step), y + ch - bh, math.max(1, math.floor(step) - 1), bh, GREENS[3])
+  end
+  renderer.draw_rect(x + pad, y + ch, cw, 1, tint(style.dim, 80))
+  y = y + ch + py
+
+  y = title("BY WEEKDAY", x, y)
+  local busiest, lw, nw = 1, small_font:get_width("Mon") + pad, small_font:get_width("00,000") + pad / 2
+  for i, n in ipairs(st.weekdays) do if n > st.weekdays[busiest] then busiest = i end end
+  local top = st.weekdays[busiest]
+  for i, n in ipairs(st.weekdays) do
+    local ry = y + (i - 1) * (sh + 2)
+    common.draw_text(small_font, style.dim, WEEKDAYS[i], nil, x + pad, ry, 0, sh)
+    local bw = top > 0 and math.floor((cw - lw - nw) * n / top + 0.5) or 0
+    renderer.draw_rect(x + pad + lw, ry + 2, bw, sh - 4, i == busiest and top > 0 and GREENS[4] or tint(style.dim, 90))
+    common.draw_text(small_font, i == busiest and style.text or style.dim, data.thousands(n), "right", x + pad, ry, cw, sh)
+  end
+  y = y + 7 * (sh + 2) + py
+
+  local line = string.format("Avg %.1f/day", st.average)
+  if st.best and st.best.count > 0 then line = string.format("Best day %s on %s · %s", data.thousands(st.best.count), data.short_date(st.best.date), line) end
+  common.draw_text(small_font, style.dim, views.fit(small_font, line, cw), nil, x + pad, y, 0, sh)
+  return y + sh + py
 end
 
 function GitHub:draw()
@@ -219,6 +289,7 @@ function GitHub:draw()
     y = self:draw_card(model, x, y, w)
     y = self:draw_tiles(model, x, y, w)
     y = self:draw_heatmap(model, x, y, w)
+    y = self:draw_charts(model, x, y, w)
   end
   self.height = y + self.scroll.y - top
   core.pop_clip_rect(); self:draw_scrollbar()

@@ -108,13 +108,6 @@ function core.init(...)
     assert(not bp.visible, 'Backlog did not hide')
     local github = require 'plugins.github'
     local gh_git, gh_data = require 'plugins.scm.git', require 'plugins.github.data'
-    local argv, shell
-    local process_start, system_exec = process.start, system.exec
-    process.start = function(cmd) argv = cmd; return {} end
-    system.exec = function(cmd) shell = cmd end
-    github.open_url('https://github.com/o/r/pull/1?$(touch x)')
-    process.start, system.exec = process_start, system_exec
-    assert(type(argv) == 'table' and argv[1] == 'open' and argv[2] == 'https://github.com/o/r/pull/1?$(touch x)' and not shell, 'GitHub url went through the shell: ' .. tostring(shell))
     local exec, parse = gh_git.exec, gh_data.parse
     local fetches = 0
     gh_git.exec = function(cwd, executable, ...)
@@ -128,14 +121,10 @@ function core.init(...)
     gh_git.exec, gh_data.parse = exec, parse
     assert(fetches == 1, 'Two refreshes started ' .. fetches .. ' fetches')
     assert(github.status.state == 'error', 'GitHub fetch whose parse throws ended in ' .. github.status.state)
-    local opened
-    github.open_url = function(url) opened = url end
     github.model = {login = 'me', fetched_at = os.time(),
       windows = {{label = 'Today', contributions = 85, commits = 0}, {label = 'This week', contributions = 90, commits = 1},
         {label = 'This month', contributions = 100, commits = 2}, {label = 'This year', contributions = 6183, commits = 1486}},
-      days = {{date = '2026-01-01', count = 3}, {date = '2026-01-02', count = 0}}, streak = {current = 1, longest = 4},
-      prs = {{title = 'Fix the thing', repo = 'o/r', url = 'https://github.com/o/r/pull/1', updated = '2026-10-06T20:00:00Z'}},
-      reviews = {}, pushes = nil}
+      days = {{date = '2026-01-01', count = 3}, {date = '2026-01-02', count = 0}}, streak = {current = 1, longest = 4}}
     github.status = {state = 'ok', at = os.time()}
     command.perform('backlog:toggle'); command.perform('github:toggle')
     coroutine.yield(0.1)
@@ -148,11 +137,7 @@ function core.init(...)
     ghp:draw()
     renderer.draw_text = draw_text
     local all = table.concat(drawn, '\n')
-    assert(all:find('85', 1, true) and all:find('Fix the thing', 1, true) and all:find('Unavailable', 1, true)
-      and all:find('6,183', 1, true) and all:find('1,486 commits\n', 1, true) and all:find('0 commits\n', 1, true), 'GitHub panel missing content: ' .. all)
-    local hit = assert(ghp.hits[1], 'GitHub panel has no clickable rows')
-    ghp:on_mouse_pressed('left', hit.x + 5, hit.y + hit.h / 2, 1)
-    assert(opened == 'https://github.com/o/r/pull/1', 'GitHub row opened ' .. tostring(opened))
+    assert(all:find('85', 1, true) and all:find('6,183', 1, true) and all:find('1,486 commits\n', 1, true) and all:find('0 commits\n', 1, true), 'GitHub panel missing content: ' .. all)
     github.status = {state = 'auth', at = os.time()}; github.model = nil
     drawn = {}
     renderer.draw_text = function(font, text, ...) drawn[#drawn + 1] = text; return draw_text(font, text, ...) end

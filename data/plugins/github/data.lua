@@ -3,7 +3,6 @@ local json = require "plugins.lsp.json"
 local M = {}
 
 local LABELS = {"Today", "This week", "This month", "This year"}
-local MAX_ROWS = 10
 
 function M.windows(now)
   local t = os.date("*t", now)
@@ -22,7 +21,6 @@ function M.windows(now)
 end
 
 local TOTALS = "totalCommitContributions totalPullRequestContributions totalIssueContributions totalPullRequestReviewContributions restrictedContributionsCount"
-local PR = "title url updatedAt repository { nameWithOwner }"
 
 function M.query(windows)
   local aliases = {}
@@ -30,9 +28,7 @@ function M.query(windows)
     local calendar = i == #windows and " contributionCalendar { weeks { contributionDays { date contributionCount } } }" or ""
     aliases[i] = string.format('w%d: contributionsCollection(from: "%s") { %s%s }', i, w.from, TOTALS, calendar)
   end
-  return "{ viewer { login " .. table.concat(aliases, " ")
-    .. " pullRequests(states: OPEN, first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { " .. PR .. " } } }"
-    .. ' search(query: "is:pr is:open review-requested:@me", type: ISSUE, first: 10) { nodes { ... on PullRequest { ' .. PR .. " } } } }"
+  return "{ viewer { login " .. table.concat(aliases, " ") .. " } }"
 end
 
 function M.thousands(n) return (tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")) end
@@ -46,31 +42,7 @@ local function list(t)
   return items
 end
 
-local function pull_requests(nodes)
-  local rows = {}
-  for _, n in ipairs(list(nodes)) do
-    if n.url and #rows < MAX_ROWS then
-      rows[#rows + 1] = {title = n.title, repo = n.repository and n.repository.nameWithOwner or "", url = n.url, updated = n.updatedAt}
-    end
-  end
-  return rows
-end
-
-local function pushes(events)
-  local rows = {}
-  for _, e in ipairs(list(events)) do
-    if e.type == "PushEvent" and type(e.payload) == "table" and type(e.repo) == "table" and e.repo.name and e.created_at then
-      rows[#rows + 1] = {repo = e.repo.name, branch = (e.payload.ref or ""):gsub("^refs/heads/", ""),
-        url = "https://github.com/" .. e.repo.name .. "/commit/" .. (e.payload.head or ""), at = e.created_at}
-    end
-  end
-  -- The events feed is in ingestion order, not push time.
-  table.sort(rows, function(a, b) return a.at > b.at end)
-  for i = #rows, MAX_ROWS + 1, -1 do rows[i] = nil end
-  return rows
-end
-
-function M.parse(graphql_json, events_json)
+function M.parse(graphql_json)
   local ok, data = pcall(json.decode, graphql_json)
   if not ok or type(data) ~= "table" then return nil, "Unreadable response from GitHub" end
   if data.errors then return nil, data.errors[1] and data.errors[1].message or "GitHub API error" end
@@ -90,10 +62,6 @@ function M.parse(graphql_json, events_json)
       end
     end
   end
-  model.prs = pull_requests(viewer.pullRequests and viewer.pullRequests.nodes)
-  model.reviews = pull_requests(data.data.search and data.data.search.nodes)
-  local events_ok, events = pcall(json.decode, events_json)
-  model.pushes = events_ok and type(events) == "table" and pushes(events) or nil
   return model
 end
 

@@ -415,33 +415,19 @@ do
   s = gh.streak(days({1, 1, 0, 0, 0}), '2026-01-05')
   check(s.current == 0 and s.longest == 2, 'Gap resets the current streak')
   local function window(c, r) return string.format('{"totalCommitContributions":%d,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":%d}', c, r) end
-  local pr = '{"title":"Fix it","url":"https://github.com/o/r/pull/1","updatedAt":"2026-10-06T20:00:00Z","repository":{"nameWithOwner":"o/r"}}'
   local graphql = '{"data":{"viewer":{"login":"me","w1":' .. window(0, 85) .. ',"w2":' .. window(2, 100) .. ',"w3":' .. window(3, 200)
     .. ',"w4":{"totalCommitContributions":4,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":300,'
-    .. '"contributionCalendar":{"weeks":[{"contributionDays":[{"date":"2026-01-01","contributionCount":3},{"date":"2026-01-02","contributionCount":0}]},{"contributionDays":[{"date":"2026-01-03","contributionCount":5}]}]}},'
-    .. '"pullRequests":{"nodes":[' .. pr .. ']}},"search":{"nodes":[' .. pr:gsub('Fix it', 'Review me') .. ',{}]}}}'
-  local events = '[{"type":"PushEvent","repo":{"name":"o/old"},"created_at":"2026-10-05T09:00:00Z","payload":{"ref":"refs/heads/dev","head":"def456"}},'
-    .. '{"type":"PushEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T21:00:00Z","payload":{"ref":"refs/heads/main","head":"abc123","commits":[]}},'
-    .. '{"type":"PullRequestEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T20:00:00Z","payload":{}}]'
-  local model = assert(gh.parse(graphql, events))
+    .. '"contributionCalendar":{"weeks":[{"contributionDays":[{"date":"2026-01-01","contributionCount":3},{"date":"2026-01-02","contributionCount":0}]},{"contributionDays":[{"date":"2026-01-03","contributionCount":5}]}]}}}}}'
+  local model = assert(gh.parse(graphql))
   check(model.login == 'me' and model.windows[1].label == 'Today' and model.windows[1].contributions == 88 and model.windows[1].commits == 0, 'GitHub contributions include restricted ones')
   check(model.windows[4].contributions == 307 and model.windows[4].commits == 4, 'GitHub year totals and commit counts')
   check(#model.days == 3 and model.days[3].date == '2026-01-03' and model.days[3].count == 5, 'GitHub calendar flattened oldest first')
-  check(#model.prs == 1 and model.prs[1].title == 'Fix it' and model.prs[1].repo == 'o/r' and model.prs[1].url == 'https://github.com/o/r/pull/1', 'GitHub PR rows')
-  check(#model.reviews == 1 and model.reviews[1].title == 'Review me', 'GitHub review rows skip non-PR results')
-  check(#model.pushes == 2 and model.pushes[2].repo == 'o/old' and model.pushes[1].branch == 'main' and model.pushes[1].url == 'https://github.com/o/r/commit/abc123' and model.pushes[1].at == '2026-10-06T21:00:00Z', 'GitHub push rows, newest first')
-  check(gh.parse(graphql, nil).pushes == nil, 'GitHub pushes unavailable without events')
+  check(model.prs == nil and model.reviews == nil and model.pushes == nil and not gh.query(w):find('pullRequests', 1, true), 'GitHub no longer fetches PR, review or push lists')
   check(not gh.parse('{"errors":[{"message":"Bad credentials"}]}'), 'GitHub API errors fail the parse')
-  local holes = '{"data":{"viewer":{"login":"me","w4":{"contributionCalendar":{"weeks":[null,{"contributionDays":[null,{"date":"2026-01-01"},{"date":"2026-01-02","contributionCount":2}]}]}},'
-    .. '"pullRequests":{"nodes":[null,' .. pr .. ']}},"search":{"nodes":[null,' .. pr .. ']}}}'
-  local partial = '[{"type":"PushEvent","created_at":"2026-10-06T09:00:00Z","payload":{"ref":"refs/heads/x"}},'
-    .. '{"type":"PushEvent","repo":{"name":"o/r"},"payload":{"ref":"refs/heads/y"}},{"type":"PushEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T09:00:00Z"},'
-    .. '{"type":"PushEvent","repo":{"name":"o/ok"},"created_at":"2026-10-06T10:00:00Z","payload":{"ref":"refs/heads/main","head":"abc"}},null]'
-  local ok_holes, holed = pcall(gh.parse, holes, partial)
+  local holes = '{"data":{"viewer":{"login":"me","w4":{"contributionCalendar":{"weeks":[null,{"contributionDays":[null,{"date":"2026-01-01"},{"date":"2026-01-02","contributionCount":2}]}]}}}}}'
+  local ok_holes, holed = pcall(gh.parse, holes)
   check(ok_holes, 'GitHub parse tolerates missing fields: ' .. tostring(holed))
-  check(ok_holes and holed and #holed.prs == 1 and #holed.reviews == 1, 'GitHub PR lists survive null entries: ' .. tostring(holed))
   check(ok_holes and holed and #holed.days == 1 and holed.days[1].count == 2, 'GitHub calendar skips null and incomplete days')
-  check(ok_holes and holed and #holed.pushes == 1 and holed.pushes[1].repo == 'o/ok', 'GitHub pushes skip events missing repo, time or payload')
   check(gh.thousands(0) == '0' and gh.thousands(1486) == '1,486' and gh.thousands(6183) == '6,183' and gh.thousands(1234567) == '1,234,567' and gh.thousands(999) == '999', 'GitHub numbers get thousands separators')
 end
 assert(os.execute('rm -rf ' .. tmp))

@@ -1,5 +1,5 @@
 -- mod-version:4
--- GitHub: the signed-in user's contributions, streak, PRs and pushes, fetched through `gh`.
+-- GitHub: the signed-in user's contributions and streak, fetched through `gh`.
 local core = require "core"
 local config = require "core.config"
 local common = require "core.common"
@@ -17,7 +17,6 @@ local REFRESH_SECONDS = 600
 -- model: what the panel draws (see plugins.github.data). status.state is one of
 -- "idle" | "loading" | "ok" | "auth" | "error"; status.at is the last fetch attempt.
 local M = {model = nil, status = {state = "idle"}}
-function M.open_url(url) process.start({"open", url}) end
 
 local function first_line(text) return (tostring(text):match("[^\r\n]+") or tostring(text)) end
 local function needs_login(err)
@@ -31,8 +30,6 @@ local function load()
   if not out then return nil, err end
   local model, parse_err = data.parse(out)
   if not model then return nil, parse_err end
-  local events = git.exec(USERDIR, "gh", {"api", "/users/" .. model.login .. "/events?per_page=50"}, nil, 30)
-  model = data.parse(out, events)
   model.streak = data.streak(model.days, os.date("!%Y-%m-%d"))
   model.fetched_at = os.time()
   return model
@@ -59,7 +56,7 @@ end
 
 local GitHub = View:extend()
 local panel
-function GitHub:new() GitHub.super.new(self); self.visible = true; self.scrollable = true; self.height = 0; self.hits = {} end
+function GitHub:new() GitHub.super.new(self); self.visible = true; self.scrollable = true; self.height = 0 end
 function GitHub:get_name() return "GitHub" end
 function GitHub:get_size() return self.visible and options.width * SCALE or 0, 0 end
 function GitHub:set_target_size(axis, width)
@@ -131,29 +128,6 @@ function GitHub:draw_heatmap(model, x, y, w)
   return y + lh()
 end
 
-function GitHub:draw_section(title, rows, x, y, w, primary, secondary, time)
-  local pad, fh = style.padding.x, style.font:get_height()
-  y = y + style.padding.y
-  common.draw_text(style.font, style.accent, title, nil, x + pad, y, 0, lh())
-  y = y + lh()
-  if not rows or #rows == 0 then
-    common.draw_text(style.font, style.dim, rows and "None" or "Unavailable", nil, x + pad, y, 0, lh())
-    return y + lh()
-  end
-  for _, row in ipairs(rows) do
-    local h = fh * 2 + style.padding.y
-    if self.hover_y and self.hover_y >= y and self.hover_y < y + h then renderer.draw_rect(x, y, w, h, style.line_highlight) end
-    local when = views.relative(row[time])
-    local ww = style.font:get_width(when)
-    common.draw_text(style.font, style.dim, when, nil, x + w - pad - ww, y + style.padding.y / 2, 0, fh)
-    common.draw_text(style.font, style.text, views.fit(style.font, row[primary], w - pad * 3 - ww), nil, x + pad, y + style.padding.y / 2, 0, fh)
-    common.draw_text(style.font, style.dim, views.fit(style.font, row[secondary], w - pad * 2), nil, x + pad, y + style.padding.y / 2 + fh, 0, fh)
-    self.hits[#self.hits + 1] = {x = x, y = y, w = w, h = h, url = row.url}
-    y = y + h
-  end
-  return y
-end
-
 function GitHub:draw()
   if not self.visible then return end
   self:draw_background(style.background2)
@@ -167,7 +141,6 @@ function GitHub:draw()
   local hovered = self.hover_x and self.hover_x >= bx and self.hover_y and self.hover_y < top
   common.draw_text(style.font, (hovered or status.state == "loading") and style.accent or style.dim, label, "center", bx, self.position.y, bw, header_h())
 
-  self.hits = {}
   core.push_clip_rect(x, top, w, self.size.y - header_h())
   local y = top - self.scroll.y
   local note
@@ -182,9 +155,6 @@ function GitHub:draw()
   if model and status.state ~= "auth" then
     y = self:draw_tiles(model, x, y, w)
     y = self:draw_heatmap(model, x, y, w)
-    y = self:draw_section("MY PULL REQUESTS", model.prs, x, y, w, "title", "repo", "updated")
-    y = self:draw_section("REVIEW REQUESTS", model.reviews, x, y, w, "title", "repo", "updated")
-    y = self:draw_section("RECENT PUSHES", model.pushes, x, y, w, "repo", "branch", "at")
   end
   self.height = y + self.scroll.y - top
   core.pop_clip_rect(); self:draw_scrollbar()
@@ -199,10 +169,6 @@ function GitHub:on_mouse_pressed(button, x, y, clicks)
   if GitHub.super.on_mouse_pressed(self, button, x, y, clicks) then return true end
   local b = self.refresh_button
   if b and x >= b.x and x < b.x + b.w and y >= b.y and y < b.y + b.h then M.refresh(); return true end
-  if y < self.position.y + header_h() then return true end
-  for _, hit in ipairs(self.hits) do
-    if y >= hit.y and y < hit.y + hit.h then M.open_url(hit.url); return true end
-  end
   return true
 end
 

@@ -132,7 +132,7 @@ function core.init(...)
     github.open_url = function(url) opened = url end
     github.model = {login = 'me', fetched_at = os.time(),
       windows = {{label = 'Today', contributions = 85, commits = 0}, {label = 'This week', contributions = 90, commits = 1},
-        {label = 'This month', contributions = 100, commits = 2}, {label = 'This year', contributions = 900, commits = 300}},
+        {label = 'This month', contributions = 100, commits = 2}, {label = 'This year', contributions = 6183, commits = 1486}},
       days = {{date = '2026-01-01', count = 3}, {date = '2026-01-02', count = 0}}, streak = {current = 1, longest = 4},
       prs = {{title = 'Fix the thing', repo = 'o/r', url = 'https://github.com/o/r/pull/1', updated = '2026-10-06T20:00:00Z'}},
       reviews = {}, pushes = nil}
@@ -148,7 +148,8 @@ function core.init(...)
     ghp:draw()
     renderer.draw_text = draw_text
     local all = table.concat(drawn, '\n')
-    assert(all:find('85', 1, true) and all:find('Fix the thing', 1, true) and all:find('Unavailable', 1, true), 'GitHub panel missing content: ' .. all)
+    assert(all:find('85', 1, true) and all:find('Fix the thing', 1, true) and all:find('Unavailable', 1, true)
+      and all:find('6,183', 1, true) and all:find('1,486 commits\n', 1, true) and all:find('0 commits\n', 1, true), 'GitHub panel missing content: ' .. all)
     local hit = assert(ghp.hits[1], 'GitHub panel has no clickable rows')
     ghp:on_mouse_pressed('left', hit.x + 5, hit.y + hit.h / 2, 1)
     assert(opened == 'https://github.com/o/r/pull/1', 'GitHub row opened ' .. tostring(opened))

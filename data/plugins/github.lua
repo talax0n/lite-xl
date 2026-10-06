@@ -77,6 +77,7 @@ end
 
 local number_font, small_font
 local function tint(c, a) return {c[1], c[2], c[3], a} end
+local GREENS = {{14, 68, 41, 255}, {0, 109, 50, 255}, {38, 166, 65, 255}, {57, 211, 83, 255}}
 
 -- Shade thresholds: quartiles of the non-zero days, as on the GitHub profile graph.
 local function levels(days)
@@ -102,10 +103,10 @@ function GitHub:draw_tiles(model, x, y, w)
     local tx, ty = x + pad + ((i - 1) % 2) * (tw + pad), y + ((i - 1) // 2) * (th + pad)
     renderer.draw_rect(tx, ty, tw, th, style.background)
     local cy = ty + style.padding.y
-    common.draw_text(number_font, style.text, tostring(win.contributions), nil, tx + pad, cy, 0, number_font:get_height())
+    common.draw_text(number_font, style.text, data.thousands(win.contributions), nil, tx + pad, cy, 0, number_font:get_height())
     cy = cy + number_font:get_height()
     common.draw_text(style.font, style.accent, win.label, nil, tx + pad, cy, 0, style.font:get_height())
-    common.draw_text(small_font, style.dim, views.fit(small_font, win.commits .. " commits visible", tw - pad * 2), nil, tx + pad, cy + style.font:get_height(), 0, style.font:get_height())
+    common.draw_text(small_font, style.dim, views.fit(small_font, data.thousands(win.commits) .. " commits", tw - pad * 2), nil, tx + pad, cy + style.font:get_height(), 0, style.font:get_height())
   end
   return y + (th + pad) * 2
 end
@@ -121,7 +122,7 @@ function GitHub:draw_heatmap(model, x, y, w)
     local slot = i - 1 + offset
     local level = 0
     if day.count > 0 then level = 1; for _, t in ipairs(self.levels) do if day.count > t then level = level + 1 end end end
-    local color = level == 0 and style.line_highlight or tint(style.accent, 64 * level - 1)
+    local color = level == 0 and tint(style.dim, 48) or GREENS[level]
     renderer.draw_rect(x + style.padding.x + (slot // 7) * step, y + (slot % 7) * step, size, size, color)
   end
   y = y + step * 7 + style.padding.y

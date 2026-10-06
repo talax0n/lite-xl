@@ -35,8 +35,8 @@ contributions. Therefore:
   `totalCommitContributions + totalPullRequestContributions +
   totalIssueContributions + totalPullRequestReviewContributions +
   restrictedContributionsCount` for that window.
-- Each tile has a second line "N commits visible" from
-  `totalCommitContributions`.
+- Each tile has a second line "N commits" from `totalCommitContributions`.
+  Numbers use thousands separators ("6,183", "1,486 commits").
 
 ## Data shape
 
@@ -90,9 +90,9 @@ model = {
 - Refresh on first open, every 10 minutes while visible, and on the
   header refresh button. One fetch at a time.
 - Layout, top to bottom: header (`GITHUB · <login>`, refresh button, "updated
-  N min ago"), 2×2 tiles (big contributions number, label, "N commits
-  visible"), heatmap (53 columns × 7 rows, cell size fit to width, 5 shades
-  of `style.accent` by quartile), streak line, then sections MY PULL
+  N min ago"), 2×2 tiles (big contributions number, label, "N commits"),
+  heatmap (53 columns × 7 rows, cell size fit to width, a dim empty cell and
+  4 GitHub greens by quartile), streak line, then sections MY PULL
   REQUESTS, REVIEW REQUESTS, RECENT PUSHES. Rows show title / repo and a
   relative time; empty sections say "None". Long text cut with `…`.
 - Clicking a row opens its url with `open` (`system.exec`). Mouse wheel

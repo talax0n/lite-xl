@@ -64,7 +64,7 @@ function GitHub:update()
   GitHub.super.update(self)
 end
 
-local number_font
+local number_font, small_font
 local function tint(c, a) return {c[1], c[2], c[3], a} end
 
 -- Shade thresholds: quartiles of the non-zero days, as on the GitHub profile graph.
@@ -83,6 +83,7 @@ end
 
 function GitHub:draw_tiles(model, x, y, w)
   number_font = number_font or style.font:copy(28 * SCALE)
+  small_font = small_font or style.font:copy(12 * SCALE)
   local pad = style.padding.x
   local tw = (w - pad * 3) / 2
   local th = number_font:get_height() + style.font:get_height() * 2 + style.padding.y * 2
@@ -93,7 +94,7 @@ function GitHub:draw_tiles(model, x, y, w)
     common.draw_text(number_font, style.text, tostring(win.contributions), nil, tx + pad, cy, 0, number_font:get_height())
     cy = cy + number_font:get_height()
     common.draw_text(style.font, style.accent, win.label, nil, tx + pad, cy, 0, style.font:get_height())
-    common.draw_text(style.font, style.dim, views.fit(style.font, win.commits .. " commits visible", tw - pad * 2), nil, tx + pad, cy + style.font:get_height(), 0, style.font:get_height())
+    common.draw_text(small_font, style.dim, views.fit(small_font, win.commits .. " commits visible", tw - pad * 2), nil, tx + pad, cy + style.font:get_height(), 0, style.font:get_height())
   end
   return y + (th + pad) * 2
 end

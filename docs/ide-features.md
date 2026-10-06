@@ -77,6 +77,23 @@ and listing/creating issues. Publishing and review operations run only when you
 choose their actions. GitHub Actions administration, releases, and repository
 settings are accessible through the integrated terminal or GitHub website.
 
+### GitHub activity panel
+
+The chart icon in the activity bar (`github:toggle`) opens a panel on the right
+with your own GitHub activity. It shows contribution counts for today, this
+week, this month and this year, a year heatmap with the current and longest
+streak, your open pull requests, pull requests waiting for your review, and
+your recent pushes. Clicking a row opens it in the browser.
+
+Data comes from the signed-in GitHub CLI (`gh api graphql` and the events
+feed). The panel refreshes on first open, every 10 minutes while visible, and
+from its Refresh button. Counts are contributions, the same figure as the
+profile graph, so private organization work is included. Each tile also shows
+how many of those are publicly visible commits. The heatmap and streak use
+GitHub's calendar days, which are UTC. If `gh` is missing or signed out, the
+panel asks you to run `gh auth login`. Set `config.plugins.github.width` to
+change its width.
+
 ## Terminal
 
 Press **Ctrl+`** to toggle the terminal, or **Ctrl+Shift+`** for a new session.

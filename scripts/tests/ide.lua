@@ -396,5 +396,41 @@ do
   check(not bad_run[1] and bad_run[2]:find('no network', 1, true), 'Failed install reports its output')
   wait(function() return busy == 0 end, 'Source control commands never finished')
 end
+do
+  local gh = require 'plugins.github.data'
+  local function utc(y, m, d) return os.date('!%Y-%m-%dT%H:%M:%SZ', os.time({year = y, month = m, day = d, hour = 0})) end
+  local w = gh.windows(os.time({year = 2026, month = 10, day = 14, hour = 15}))
+  check(#w == 4 and w[1].label == 'Today' and w[4].label == 'This year', 'GitHub windows are ordered')
+  check(w[1].from == utc(2026, 10, 14) and w[2].from == utc(2026, 10, 12) and w[3].from == utc(2026, 10, 1) and w[4].from == utc(2026, 1, 1), 'GitHub windows start at local midnight, Monday, the 1st and Jan 1st')
+  check(gh.query(w):find('w4: contributionsCollection(from: "' .. w[4].from .. '")', 1, true), 'GitHub query aliases each window')
+  local function days(counts)
+    local result = {}
+    for i, n in ipairs(counts) do result[i] = {date = string.format('2026-01-%02d', i), count = n} end
+    return result
+  end
+  local s = gh.streak(days({1, 1, 1, 0, 2, 2}), '2026-01-06')
+  check(s.current == 2 and s.longest == 3, 'Streak ending today, longest picks the longest run')
+  s = gh.streak(days({0, 1, 1, 1, 0}), '2026-01-05')
+  check(s.current == 3, 'Streak counts back from yesterday when today is 0')
+  s = gh.streak(days({1, 1, 0, 0, 0}), '2026-01-05')
+  check(s.current == 0 and s.longest == 2, 'Gap resets the current streak')
+  local function window(c, r) return string.format('{"totalCommitContributions":%d,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":%d}', c, r) end
+  local pr = '{"title":"Fix it","url":"https://github.com/o/r/pull/1","updatedAt":"2026-10-06T20:00:00Z","repository":{"nameWithOwner":"o/r"}}'
+  local graphql = '{"data":{"viewer":{"login":"me","w1":' .. window(0, 85) .. ',"w2":' .. window(2, 100) .. ',"w3":' .. window(3, 200)
+    .. ',"w4":{"totalCommitContributions":4,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":300,'
+    .. '"contributionCalendar":{"weeks":[{"contributionDays":[{"date":"2026-01-01","contributionCount":3},{"date":"2026-01-02","contributionCount":0}]},{"contributionDays":[{"date":"2026-01-03","contributionCount":5}]}]}},'
+    .. '"pullRequests":{"nodes":[' .. pr .. ']}},"search":{"nodes":[' .. pr:gsub('Fix it', 'Review me') .. ',{}]}}}'
+  local events = '[{"type":"PushEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T21:00:00Z","payload":{"ref":"refs/heads/main","head":"abc123","commits":[]}},'
+    .. '{"type":"PullRequestEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T20:00:00Z","payload":{}}]'
+  local model = assert(gh.parse(graphql, events))
+  check(model.login == 'me' and model.windows[1].label == 'Today' and model.windows[1].contributions == 88 and model.windows[1].commits == 0, 'GitHub contributions include restricted ones')
+  check(model.windows[4].contributions == 307 and model.windows[4].commits == 4, 'GitHub year totals and commit counts')
+  check(#model.days == 3 and model.days[3].date == '2026-01-03' and model.days[3].count == 5, 'GitHub calendar flattened oldest first')
+  check(#model.prs == 1 and model.prs[1].title == 'Fix it' and model.prs[1].repo == 'o/r' and model.prs[1].url == 'https://github.com/o/r/pull/1', 'GitHub PR rows')
+  check(#model.reviews == 1 and model.reviews[1].title == 'Review me', 'GitHub review rows skip non-PR results')
+  check(#model.pushes == 1 and model.pushes[1].branch == 'main' and model.pushes[1].url == 'https://github.com/o/r/commit/abc123' and model.pushes[1].at == '2026-10-06T21:00:00Z', 'GitHub push rows')
+  check(gh.parse(graphql, nil).pushes == nil, 'GitHub pushes unavailable without events')
+  check(not gh.parse('{"errors":[{"message":"Bad credentials"}]}'), 'GitHub API errors fail the parse')
+end
 assert(os.execute('rm -rf ' .. tmp))
 print(string.format('PASS: %d checks against real Git repositories and a native PTY', checks))

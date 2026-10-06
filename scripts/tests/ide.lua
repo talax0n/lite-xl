@@ -252,5 +252,50 @@ run(function()
   local s = ops.targets(solo)[1]
   check(s.base == nil and s.ahead == 0, 'No upstream gives no base')
 end)
+-- Language servers: JSON, framing, columns, URIs, roots, server table, diagnostics.
+system.get_file_info = system.get_file_info or function(path)
+  local f = io.open(path, 'rb'); if f then f:close(); return {type = 'file'} end
+end
+do
+  local json = require 'plugins.lsp.json'
+  local util = require 'plugins.lsp.util'
+  local rpc = require 'plugins.lsp.rpc'
+  local servers = require 'plugins.lsp.servers'
+  local t = json.decode(json.encode({a = {1, 2}, s = 'é "q"\n', n = json.null, e = {}}))
+  check(t.a[2] == 2 and t.s == 'é "q"\n' and t.n == nil and next(t.e) == nil, 'JSON round-trip')
+  local feed = rpc.parser()
+  local frame = rpc.frame({id = 1, result = 'héllo'})
+  check(#feed(frame:sub(1, 10)) == 0, 'Partial frame waits')
+  local got = feed(frame:sub(11) .. frame .. 'Content-Length: 7\r\n\r\n{"a"')
+  check(#got == 2 and json.decode(got[2]).result == 'héllo', 'Split and merged frames, byte lengths')
+  got = feed(':1}')
+  check(#got == 1 and json.decode(got[1]).a == 1, 'Frame completed by a later chunk')
+  check(#feed('X-Junk: 1\r\n\r\n' .. rpc.frame({id = 2})) == 1, 'Malformed header resyncs')
+  check(util.byte_col('a😀b', 3) == 6 and util.utf16_col('a😀b', 6) == 3 and util.byte_col('é', 1) == 3, 'UTF-16 columns')
+  check(util.uri_to_path(util.path_to_uri('/a b/é.ts')) == '/a b/é.ts' and util.path_to_uri('/a b') == 'file:///a%20b', 'File URIs')
+  local tsx = servers.find('/x/app.tsx')
+  check(tsx.name == 'typescript' and servers.language_id(tsx, '/x/app.tsx') == 'typescriptreact'
+    and servers.find('/x/Dockerfile').name == 'docker' and servers.find('/x/a.txt') == nil, 'Server lookup by file name')
+  local d = util.diagnostics({
+    {range = {start = {line = 2, character = 1}, ['end'] = {line = 2, character = 3}}, severity = 2, message = 'w'},
+    {range = {start = {line = 0, character = 2}, ['end'] = {line = 0, character = 4}}, message = 'e', source = 'ts', code = 2322},
+  }, {'é = 1\n', '\n', 'xyz\n'})
+  check(d[1].line1 == 1 and d[1].col1 == 4 and d[1].severity == 1 and util.describe(d[1]) == 'ts(2322): e' and d[2].line1 == 3, 'Diagnostics normalised and ordered')
+  check(util.hover_text({kind = 'markdown', value = '```ts\nconst x: number\n```\n\nDocs'}) == 'const x: number\n\nDocs', 'Hover markdown to text')
+  local times = {}
+  check(util.may_restart(times, 0) and util.may_restart(times, 1) and util.may_restart(times, 2)
+    and not util.may_restart(times, 3) and util.may_restart(times, 61), 'Crash restarts limited per minute')
+  local root = tmp .. '/lsp-root'
+  assert(os.execute("mkdir -p '" .. root .. "/pkg/src'"))
+  io.open(root .. '/pkg/package.json', 'w'):close()
+  check(util.find_root(root .. '/pkg/src/a.ts', {'package.json'}) == root .. '/pkg', 'Root marker found')
+  check(util.find_root(root .. '/x.ts', {'nope.json'}, '/fallback') == '/fallback', 'Root falls back')
+  local problems = util.problems({['/b'] = {{severity = 2, line1 = 1}, {severity = 1, line1 = 9}}, ['/a'] = {{severity = 1, line1 = 3}}, ['/c'] = {}})
+  check(#problems == 2 and problems[1].path == '/a' and problems[2].items[1].line1 == 9, 'Problems grouped, errors first')
+  local locs = util.locations({{targetUri = 'file:///a', targetSelectionRange = {start = {line = 1, character = 2}, ['end'] = {line = 1, character = 5}}}})
+  local syms = util.symbols({{name = 'A', range = {}, selectionRange = {start = {line = 3, character = 0}, ['end'] = {line = 3, character = 1}},
+    children = {{name = 'b', selectionRange = {start = {line = 4, character = 2}, ['end'] = {line = 4, character = 3}}}}}}, 'file:///s')
+  check(locs[1].uri == 'file:///a' and locs[1].end_character == 5 and syms[2].name == 'A.b' and syms[2].line == 4 and syms[2].uri == 'file:///s', 'Locations and symbols flattened')
+end
 assert(os.execute('rm -rf ' .. tmp))
 print(string.format('PASS: %d checks against real Git repositories and a native PTY', checks))

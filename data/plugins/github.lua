@@ -17,7 +17,7 @@ local REFRESH_SECONDS = 600
 -- model: what the panel draws (see plugins.github.data). status.state is one of
 -- "idle" | "loading" | "ok" | "auth" | "error"; status.at is the last fetch attempt.
 local M = {model = nil, status = {state = "idle"}}
-function M.open_url(url) system.exec(string.format("open %q", url)) end
+function M.open_url(url) process.start({"open", url}) end
 
 local function first_line(text) return (tostring(text):match("[^\r\n]+") or tostring(text)) end
 local function needs_login(err)

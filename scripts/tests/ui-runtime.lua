@@ -107,6 +107,13 @@ function core.init(...)
     command.perform('backlog:toggle')
     assert(not bp.visible, 'Backlog did not hide')
     local github = require 'plugins.github'
+    local argv, shell
+    local process_start, system_exec = process.start, system.exec
+    process.start = function(cmd) argv = cmd; return {} end
+    system.exec = function(cmd) shell = cmd end
+    github.open_url('https://github.com/o/r/pull/1?$(touch x)')
+    process.start, system.exec = process_start, system_exec
+    assert(type(argv) == 'table' and argv[1] == 'open' and argv[2] == 'https://github.com/o/r/pull/1?$(touch x)' and not shell, 'GitHub url went through the shell: ' .. tostring(shell))
     local opened
     github.open_url = function(url) opened = url end
     github.model = {login = 'me', fetched_at = os.time(),

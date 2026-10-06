@@ -35,9 +35,20 @@ function M.query(windows)
     .. ' search(query: "is:pr is:open review-requested:@me", type: ISSUE, first: 10) { nodes { ... on PullRequest { ' .. PR .. " } } } }"
 end
 
+function M.thousands(n) return (tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")) end
+
+-- The JSON decoder turns `null` array entries into holes, so ipairs would stop at the first one.
+local function list(t)
+  local items, n = {}, 0
+  if type(t) ~= "table" then return items end
+  for k in pairs(t) do if math.type(k) == "integer" and k > n then n = k end end
+  for i = 1, n do if type(t[i]) == "table" then items[#items + 1] = t[i] end end
+  return items
+end
+
 local function pull_requests(nodes)
   local rows = {}
-  for _, n in ipairs(nodes or {}) do
+  for _, n in ipairs(list(nodes)) do
     if n.url and #rows < MAX_ROWS then
       rows[#rows + 1] = {title = n.title, repo = n.repository and n.repository.nameWithOwner or "", url = n.url, updated = n.updatedAt}
     end
@@ -47,8 +58,8 @@ end
 
 local function pushes(events)
   local rows = {}
-  for _, e in ipairs(events) do
-    if e.type == "PushEvent" and e.payload then
+  for _, e in ipairs(list(events)) do
+    if e.type == "PushEvent" and type(e.payload) == "table" and type(e.repo) == "table" and e.repo.name and e.created_at then
       rows[#rows + 1] = {repo = e.repo.name, branch = (e.payload.ref or ""):gsub("^refs/heads/", ""),
         url = "https://github.com/" .. e.repo.name .. "/commit/" .. (e.payload.head or ""), at = e.created_at}
     end
@@ -72,8 +83,10 @@ function M.parse(graphql_json, events_json)
     model.windows[i] = {label = label, commits = commits, contributions = commits + (c.totalPullRequestContributions or 0)
       + (c.totalIssueContributions or 0) + (c.totalPullRequestReviewContributions or 0) + (c.restrictedContributionsCount or 0)}
     if c.contributionCalendar then
-      for _, week in ipairs(c.contributionCalendar.weeks or {}) do
-        for _, day in ipairs(week.contributionDays or {}) do model.days[#model.days + 1] = {date = day.date, count = day.contributionCount} end
+      for _, week in ipairs(list(c.contributionCalendar.weeks)) do
+        for _, day in ipairs(list(week.contributionDays)) do
+          if day.date and day.contributionCount then model.days[#model.days + 1] = {date = day.date, count = day.contributionCount} end
+        end
       end
     end
   end

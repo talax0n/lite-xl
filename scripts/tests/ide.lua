@@ -432,6 +432,17 @@ do
   check(#model.pushes == 2 and model.pushes[2].repo == 'o/old' and model.pushes[1].branch == 'main' and model.pushes[1].url == 'https://github.com/o/r/commit/abc123' and model.pushes[1].at == '2026-10-06T21:00:00Z', 'GitHub push rows, newest first')
   check(gh.parse(graphql, nil).pushes == nil, 'GitHub pushes unavailable without events')
   check(not gh.parse('{"errors":[{"message":"Bad credentials"}]}'), 'GitHub API errors fail the parse')
+  local holes = '{"data":{"viewer":{"login":"me","w4":{"contributionCalendar":{"weeks":[null,{"contributionDays":[null,{"date":"2026-01-01"},{"date":"2026-01-02","contributionCount":2}]}]}},'
+    .. '"pullRequests":{"nodes":[null,' .. pr .. ']}},"search":{"nodes":[null,' .. pr .. ']}}}'
+  local partial = '[{"type":"PushEvent","created_at":"2026-10-06T09:00:00Z","payload":{"ref":"refs/heads/x"}},'
+    .. '{"type":"PushEvent","repo":{"name":"o/r"},"payload":{"ref":"refs/heads/y"}},{"type":"PushEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T09:00:00Z"},'
+    .. '{"type":"PushEvent","repo":{"name":"o/ok"},"created_at":"2026-10-06T10:00:00Z","payload":{"ref":"refs/heads/main","head":"abc"}},null]'
+  local ok_holes, holed = pcall(gh.parse, holes, partial)
+  check(ok_holes, 'GitHub parse tolerates missing fields: ' .. tostring(holed))
+  check(ok_holes and holed and #holed.prs == 1 and #holed.reviews == 1, 'GitHub PR lists survive null entries: ' .. tostring(holed))
+  check(ok_holes and holed and #holed.days == 1 and holed.days[1].count == 2, 'GitHub calendar skips null and incomplete days')
+  check(ok_holes and holed and #holed.pushes == 1 and holed.pushes[1].repo == 'o/ok', 'GitHub pushes skip events missing repo, time or payload')
+  check(gh.thousands(0) == '0' and gh.thousands(1486) == '1,486' and gh.thousands(6183) == '6,183' and gh.thousands(1234567) == '1,234,567' and gh.thousands(999) == '999', 'GitHub numbers get thousands separators')
 end
 assert(os.execute('rm -rf ' .. tmp))
 print(string.format('PASS: %d checks against real Git repositories and a native PTY', checks))

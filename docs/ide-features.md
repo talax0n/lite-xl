@@ -216,3 +216,25 @@ Finish with **Push** (main checkout), or for a worktree **Merge into
 <branch>** (then remove the worktree), **Push branch**, or **Discard**, which
 deletes the worktree and its branch. Finished reviews are archived to
 `.trex/reviews/` in the main checkout.
+
+## Languages and language servers
+
+TreX highlights TypeScript/TSX/JSX, JSON, SCSS, Rust, Go, Zig, shell, YAML,
+TOML, Dockerfile, Makefile, SQL, `.env` and diffs out of the box.
+
+For TypeScript/JavaScript, JSON, Rust, Go, Zig, shell, YAML, TOML and
+Dockerfiles TreX also runs a language server. Errors and warnings appear as
+wavy underlines with a gutter dot; rest the mouse on one for the message.
+The left end of the status bar shows the file's error and warning counts;
+click them, or press **Cmd+Shift+M**, for the **Problems** tab. **F8** /
+**Shift+F8** step through problems in the file.
+
+Navigation: **F12** or **Cmd+click** goes to the definition, **Shift+F12**
+lists references, resting the mouse on a symbol (or **Cmd+I**) shows its
+type and docs, **Cmd+Shift+O** jumps to a symbol in the file and **Cmd+T**
+searches symbols in the project.
+
+When a server is missing, TreX offers to install it into
+`~/.local/share/trex/lsp` (npm or `go install`; Zig's `zls` comes from
+Homebrew). The status bar shows the server state; click it to restart a
+crashed server or see its log (`lsp:show-log`).

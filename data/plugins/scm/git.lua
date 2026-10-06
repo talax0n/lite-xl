@@ -170,7 +170,8 @@ function M.history(repo, done, reset)
     repo.unpushed = repo.unpushed or {}
     if repo.status.head == "(initial)" then repo.history_done = true; return true end
     local settings = config.plugins and config.plugins.scm or {}
-    local args = {"log", "--all", "--date-order", "--max-count=100", "--skip=" .. #repo.history, "--format=%H%x00%P%x00%an%x00%aI%x00%D%x00%s%x00"}
+    -- Stash entries are local commits ("WIP on", "index on", "untracked files on").
+    local args = {"log", "--exclude=refs/stash", "--all", "--date-order", "--max-count=100", "--skip=" .. #repo.history, "--format=%H%x00%P%x00%an%x00%aI%x00%D%x00%s%x00"}
     -- T3 Code records a checkpoint commit per agent turn under refs/t3/.
     if not settings.show_checkpoints then table.insert(args, 2, "--exclude=refs/t3/*") end
     local out, err = M.git(repo, args)

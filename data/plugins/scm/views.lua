@@ -366,6 +366,17 @@ local function graph_line(x1, y1, x2, y2, color)
     renderer.draw_rect(math.floor(x1 + (x2 - x1) * p), math.floor(y1 + (y2 - y1) * p), 2 * SCALE, 2 * SCALE, color)
   end
 end
+-- Draws a commit's lane lines and returns its dot color and x.
+function M.draw_lanes(c, x, cy, lh, gap)
+  for _, edge in ipairs(c.edges or {}) do
+    local color = palette[(edge[1] - 1) % #palette + 1]
+    graph_line(x + (edge[1] - 1) * gap, edge[3] and cy or cy - lh / 2, x + (edge[2] - 1) * gap, cy + lh / 2, color)
+  end
+  local lane = c.lane or 1
+  local color, lx = palette[(lane - 1) % #palette + 1], x + (lane - 1) * gap
+  if c.incoming then graph_line(lx, cy - lh / 2, lx, cy, color) end
+  return color, lx
+end
 function Graph:new(repo, git, on_commit)
   Graph.super.new(self, "History: " .. repo.name, {}, on_commit); self.repo, self.git = repo, git
 end
@@ -381,25 +392,23 @@ function Graph:draw()
   for i = first, last do
     local c = self.repo.history[i]; local ty = y + (i - 1) * lh; local cy = ty + lh / 2
     if i == self.selected then renderer.draw_rect(self.position.x, ty, self.size.x, lh, style.line_highlight) end
-    for _, edge in ipairs(c.edges) do
-      local color = palette[(edge[1] - 1) % #palette + 1]
-      graph_line(x + (edge[1] - 1) * gap, edge[3] and cy or cy - lh / 2, x + (edge[2] - 1) * gap, cy + lh / 2, color)
-    end
-    local color = palette[(c.lane - 1) % #palette + 1]
-    if c.incoming then graph_line(x + (c.lane - 1) * gap, cy - lh / 2, x + (c.lane - 1) * gap, cy, color) end
-    renderer.draw_rect(x + (c.lane - 1) * gap - 3 * SCALE, cy - 3 * SCALE, 7 * SCALE, 7 * SCALE, color)
+    local color, lx = M.draw_lanes(c, x, cy, lh, gap)
+    renderer.draw_rect(lx - 3 * SCALE, cy - 3 * SCALE, 7 * SCALE, 7 * SCALE, color)
     local date = relative(c.date)
     local dx = right - style.font:get_width(date)
     common.draw_text(style.font, style.dim, date, nil, dx, ty, 0, lh)
-    local author = fit(style.font, c.author, 140 * SCALE)
-    local ax = dx - px - style.font:get_width(author)
-    common.draw_text(style.font, style.dim, author, nil, ax, ty, 0, lh)
     local tx = x + math.max(4, c.lanes) * gap
     if unpushed[c.hash] then renderer.draw_rect(tx, cy - d / 2, d, d, style.accent); tx = tx + d + px / 2 end
     tx = common.draw_text(style.code_font, style.dim, c.hash:sub(1, 8), nil, tx, ty, 0, lh) + px
+    -- Narrow tabs drop the author before the subject.
+    local author = fit(style.font, c.author, 140 * SCALE)
+    local ax = dx - px - style.font:get_width(author)
+    if ax - tx < 200 * SCALE then ax = dx else common.draw_text(style.font, style.dim, author, nil, ax, ty, 0, lh) end
+    core.push_clip_rect(tx, ty, math.max(0, ax - px - tx), lh)
     for ref in c.refs:gmatch("[^,]+") do
       tx = pill(style.font, (ref:gsub("^%s+", ""):gsub("^HEAD %-> ", "")), tx, ty, lh, tint(style.caret, 50), style.caret)
     end
+    core.pop_clip_rect()
     local subject = c.subject .. (c.graph_limited and "  [additional graph lanes omitted]" or "")
     common.draw_text(style.font, style.text, fit(style.font, subject, math.max(0, ax - px - tx)), nil, tx, ty, 0, lh)
   end

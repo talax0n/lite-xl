@@ -100,9 +100,13 @@ local r1 = git.repositories[1]
 run(function()
   local hash = g(r1.root, {'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 't3 checkpoint'}):gsub('%s+$', '')
   g(r1.root, {'update-ref', 'refs/t3/x', hash})
+  local stash = g(r1.root, {'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'WIP on main: stash'}):gsub('%s+$', '')
+  g(r1.root, {'update-ref', 'refs/stash', stash})
 end)
 local function has_checkpoint() for _, c in ipairs(r1.history) do if c.subject == 't3 checkpoint' then return true end end return false end
 git.history(r1, nil, true); drain(); check(#r1.history > 0 and not has_checkpoint(), 'Checkpoints hidden from history')
+local stashed = false; for _, c in ipairs(r1.history) do if c.subject == 'WIP on main: stash' then stashed = true end end
+check(not stashed, 'Stash commits hidden from history')
 local ahead = {}
 run(function() for h in g(r1.root, {'rev-list', '@{upstream}..HEAD'}):gmatch('%x+') do ahead[#ahead + 1] = h end end)
 local marked = 0; for _ in pairs(r1.unpushed) do marked = marked + 1 end

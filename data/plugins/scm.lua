@@ -136,7 +136,6 @@ end
 local Sidebar = View:extend()
 local collapsed = {}
 local GRAPH_ROWS = 20
-local lane_colors = {{115, 175, 245}, {230, 150, 100}, {145, 200, 120}, {190, 135, 220}, {220, 195, 100}, {100, 200, 200}}
 function Sidebar:new()
   Sidebar.super.new(self); self.visible = true; self.scrollable = true; self.rows = {}; self.height = 0; self.generation = -1; self.size.x = options.width * SCALE
 end
@@ -189,7 +188,9 @@ function Sidebar:rebuild()
       if status.head and repo.graph_head ~= status.head and not repo.worker then
         repo.graph_head = status.head; git.history(repo, nil, true)
       end
-      for i = 1, math.min(GRAPH_ROWS, #repo.history) do add({kind = "graph", repo = repo, commit = repo.history[i], first = i == 1, last = i == math.min(GRAPH_ROWS, #repo.history)}) end
+      local n, lanes = math.min(GRAPH_ROWS, #repo.history), 1
+      for i = 1, n do lanes = math.max(lanes, repo.history[i].lanes or 1) end
+      for i = 1, n do add({kind = "graph", repo = repo, commit = repo.history[i], lanes = lanes, first = i == 1, last = i == n}) end
       if #repo.history > 0 then add({kind = "more", repo = repo, text = "View full graph"}) end
     end
   end
@@ -308,9 +309,11 @@ function Sidebar:draw_row(row, x, y, w)
   elseif row.kind == "graph" then
     local c = row.commit
     if hovered then renderer.draw_rect(x, y, w, h, style.line_highlight) end
-    local color = lane_colors[((c.lane or 1) - 1) % #lane_colors + 1]
-    local cx, t = x + pad * 1.5, math.max(1, math.floor(2 * SCALE))
-    renderer.draw_rect(cx - t / 2, row.first and y + h / 2 or y, t, (row.first or row.last) and h / 2 or h, color)
+    local gap, t = 10 * SCALE, math.max(1, math.floor(2 * SCALE))
+    core.push_clip_rect(x, y, w, h)
+    local color, cx = views.draw_lanes(c, x + pad * 1.5, y + h / 2, h, gap)
+    core.pop_clip_rect()
+    cx = cx + t / 2
     local d = math.floor(8 * SCALE)
     renderer.draw_rect(cx - d / 2, y + (h - d) / 2, d, d, row.first and style.background2 or color)
     if row.first then
@@ -325,7 +328,7 @@ function Sidebar:draw_row(row, x, y, w)
       right = right - rw - 4 * SCALE
     end
     core.push_clip_rect(x, y, math.max(0, right - x), h)
-    local sx = cx + pad
+    local sx = x + pad * 1.5 + row.lanes * gap
     if row.repo.unpushed and row.repo.unpushed[c.hash] then
       local s = math.floor(6 * SCALE); renderer.draw_rect(sx, y + (h - s) / 2, s, s, style.accent); sx = sx + s + pad * 0.5
     end

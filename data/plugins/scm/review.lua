@@ -202,8 +202,10 @@ end
 function Review:update_actions()
   local t, a = self.target, {}
   if t.commit then
-    a[1] = {text = "Previous", fn = function() self:step(-1) end}
-    a[2] = {text = "Next", fn = function() self:step(1) end}
+    if history_index(t) then
+      a[1] = {text = "Previous", fn = function() self:step(-1) end}
+      a[2] = {text = "Next", fn = function() self:step(1) end}
+    end
     if not self.missing and t.actions then for _, x in ipairs(t.actions(t.commit)) do a[#a + 1] = x end end
     self.actions = a
     return
@@ -527,9 +529,7 @@ function Review:draw_pane()
         elseif self:hovered(x, ry, w, lh) then renderer.draw_rect(x, ry, w, lh, style.line_highlight) end
         local right = x + w - px
         if row.time then right = right - style.font:get_width(row.time); common.draw_text(style.font, style.dim, row.time, nil, right, ry, 0, lh) end
-        core.push_clip_rect(x + px, ry, math.max(0, right - x - px * 1.5), lh)
-        common.draw_text(style.font, active and style.accent or style.text, row.text, nil, x + px, ry, 0, lh)
-        core.pop_clip_rect()
+        common.draw_text(style.font, active and style.accent or style.text, views.fit(style.font, row.text, math.max(0, right - x - px * 1.5)), nil, x + px, ry, 0, lh)
       else
         local f = row.file
         if f == current then renderer.draw_rect(x, ry, w, lh, style.selection)

@@ -465,7 +465,14 @@ local commands = {
   ["scm:history"] = function() with_repo(history) end,
   ["scm:toggle-checkpoints"] = function()
     options.show_checkpoints = not options.show_checkpoints
-    for _, repo in ipairs(git.repositories) do repo.graph_head = nil; git.history(repo, nil, true) end
+    for _, repo in ipairs(git.repositories) do
+      repo.graph_head = nil
+      git.history(repo, function()
+        for _, v in ipairs(core.root_view.root_node:get_children()) do
+          if v:is(views.Graph) and v.repo == repo and v.selected > 0 then v:select(v.selected) end
+        end
+      end, true)
+    end
     core.log("T3 checkpoints %s in history", options.show_checkpoints and "shown" or "hidden")
   end,
   ["scm:review"] = function() with_repo(function(repo) review.open(repo.root) end) end,

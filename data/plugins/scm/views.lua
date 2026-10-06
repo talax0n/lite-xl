@@ -77,7 +77,7 @@ function Text:set_text(text)
     add({kind = "gap"})
     self.summary = add({kind = "summary"})
   end
-  local file, header, old, new, diff = nil, false, 0, 0, false
+  local file, header, old, new, diff, band = nil, false, 0, 0, false, nil
   for j = i, #lines do
     local l = lines[j]
     if l:match("^diff %-%-git ") or l:match("^diff %-%-cc ") then
@@ -92,15 +92,16 @@ function Text:set_text(text)
     elseif l:match("^@@") then
       header, diff = false, true
       old, new = tonumber(l:match("%-(%d+)")) or 0, tonumber(l:match("%+(%d+)")) or 0
-      add({kind = "hunk", text = l, hunk = l:match("^@@ ") and self:count_hunks() or nil})
+      band = add({kind = "hunk", text = l, hunk = l:match("^@@ ") and self:count_hunks() or nil, lines = {}})
     elseif diff and file then
       local c = l:sub(1, 1)
-      local row = {text = l:sub(2), hunk = self.current_hunk, file = file}
+      local row = {text = l:sub(2), hunk = self.current_hunk, file = file, band = band}
       if c == "+" then row.kind, row.new = "add", new; new = new + 1; file.adds = file.adds + 1
       elseif c == "-" then row.kind, row.old = "del", old; old = old + 1; file.dels = file.dels + 1
       elseif c == "\\" then row.kind, row.text = "note", l
       else row.kind, row.old, row.new = "ctx", old, new; old, new = old + 1, new + 1 end
       add(row); self.width = math.max(self.width, #row.text)
+      band.lines[#band.lines + 1] = row
     else
       add({kind = "plain", text = l}); self.width = math.max(self.width, #l)
     end
@@ -114,27 +115,26 @@ function Text:set_text(text)
     for k, row in ipairs(list) do table.insert(rows, at + k, row) end
     table.insert(rows, at + #list + 1, {kind = "gap"})
   end
-  self.parsed = rows
   self:layout()
 end
 function Text:count_hunks() self.current_hunk = (self.current_hunk or 0) + 1; return self.current_hunk end
--- Syntax tokens for a diff line. A file's lines are tokenized together on
--- first use, carrying tokenizer state line to line and restarting per hunk.
--- ponytail: whole file at once (diffs cap at 20,000 lines); go per hunk if big files stutter.
+-- Syntax tokens for a diff line. A hunk is tokenized on first use, the old
+-- side (context and deleted lines) and the new side (context and added lines)
+-- each carrying its own tokenizer state.
 function Text:tokens(row)
-  local file = row.file
-  if not file or row.kind == "file" then return nil end
-  if file.tokenized == nil then
+  local file, band = row.file, row.band
+  if not band then return nil end
+  if file.syntax == nil then
     local syn = syntax.get(file.path)
-    file.tokenized = syn ~= syntax.plain_text_syntax and #syn.patterns > 0
-    local start
-    for i, r in ipairs(self.parsed) do if r == file.row then start = i; break end end
-    local state
-    for i = (start or #self.parsed) + 1, #self.parsed do
-      local r = self.parsed[i]
-      if r.kind == "file" then break end
-      if r.kind == "hunk" then state = nil
-      elseif file.tokenized and (r.kind == "add" or r.kind == "del" or r.kind == "ctx") then r.tokens, state = tokenizer.tokenize(syn, r.text, state) end
+    file.syntax = syn ~= syntax.plain_text_syntax and #syn.patterns > 0 and syn
+  end
+  if file.syntax and not band.tokenized then
+    band.tokenized = true
+    local syn, old, new = file.syntax, nil, nil
+    for _, r in ipairs(band.lines) do
+      if r.kind == "del" then r.tokens, old = tokenizer.tokenize(syn, r.text, old)
+      elseif r.kind == "add" then r.tokens, new = tokenizer.tokenize(syn, r.text, new)
+      elseif r.kind == "ctx" then r.tokens, new = tokenizer.tokenize(syn, r.text, new); old = select(2, tokenizer.tokenize(syn, r.text, old)) end
     end
   end
   return row.tokens
@@ -352,6 +352,7 @@ local function fit(font, text, w)
   while #text > 0 and font:get_width(text .. "…") > w do text = text:usub(1, -2) end
   return text .. "…"
 end
+M.fit = fit
 local Graph = List:extend()
 local palette = {{115, 175, 245}, {230, 150, 100}, {145, 200, 120}, {190, 135, 220}, {220, 195, 100}, {100, 200, 200}}
 local function graph_line(x1, y1, x2, y2, color)

@@ -117,6 +117,10 @@ function core.init(...)
     assert(toks and toks[1] == 'keyword' and toks[2] == 'local', 'Diff line not highlighted')
     local plain_diff = views.Text('t', 'diff --git a/f.zzz b/f.zzz\n@@ -1 +1 @@\n+local x = 1\n')
     assert(plain_diff:tokens(first_add(plain_diff)) == nil, 'Plain file got syntax tokens')
+    local sides = views.Text('t', 'diff --git a/f.lua b/f.lua\n@@ -1 +1 @@\n---[[ old\n+local x = 1\n@@ -9 +9 @@\n return x\n')
+    toks = sides:tokens(first_add(sides))
+    assert(toks and toks[1] == 'keyword', 'Deleted line state leaked into the added line: ' .. tostring(toks and toks[1]))
+    for _, r in ipairs(sides.rows) do assert(not (r.kind == 'ctx' and r.tokens), 'Undrawn hunk was tokenized') end
     assert(views.prompt and views.confirm, 'Shared prompt helpers missing')
     -- Commit review: unpushed commits on the main checkout.
     local review = require 'plugins.scm.review'
@@ -223,6 +227,7 @@ function core.init(...)
     local idx
     for i, r in ipairs(pane) do if r.kind == 'commit' and r.text == 'z more' then idx = i end end
     assert(pane[1].kind == 'heading' and pane[2].mode == 'all' and idx, 'Commit list missing from review pane')
+    rv:draw_pane()
     local plh = style.font:get_height() + style.padding.y
     rv:pane_pressed(rv.position.x + 20, rv.position.y + rv:toolbar_height() + (idx - 1) * plh + 2)
     wait(function() return not rv.loading and #rv.files == 1 and rv.files[1].path == 'f.lua' end, 'Pane commit click did not filter the diff')
@@ -244,15 +249,32 @@ function core.init(...)
     wait(function() return cv.target.commit == mine.history[3].hash and not cv.loading end, '] did not move to the older commit')
     keymap.on_key_pressed('[')
     wait(function() return cv.target.commit == mine.history[2].hash and not cv.loading end, '[ did not move back')
+    local loaded_count, oldest = #mine.history, table.remove(mine.history)
+    mine.history_done = false
+    review.show_commit(mine, mine.history[#mine.history].hash)
+    wait(function() return cv.target.commit == mine.history[#mine.history].hash and not cv.loading end, 'Last loaded commit not shown')
+    keymap.on_key_pressed(']')
+    wait(function() return cv.target.commit == oldest.hash and not cv.loading end, '] past the loaded page did not load the next one')
+    assert(#mine.history == loaded_count, 'Next page not appended: ' .. #mine.history)
     keymap.on_key_pressed('v'); cv:add_note(cv.rows[#cv.rows], 'x')
     assert(not read(root .. '/.trex/review.md') and not read(root .. '/.trex/viewed'), 'Commit tab wrote review state')
     review.show_commit(mine, string.rep('0', 40))
     wait(function() return cv.target.commit == string.rep('0', 40) and not cv.loading end, 'Unknown commit not shown in the same tab')
     assert(cv.missing and cv.rows[1].kind == 'banner' and cv.rows[1].text:find('Commit not found', 1, true), 'Missing commit banner absent')
+    for _, a in ipairs(cv.actions) do assert(a.text ~= 'Previous' and a.text ~= 'Next', 'Unknown commit offers ' .. a.text) end
     local reviews_after = 0
     for _, v in ipairs(core.root_view.root_node:get_children()) do if v:is(review.Review) then reviews_after = reviews_after + 1 end end
     assert(reviews_after == reviews_before + 1, 'Commit tab not reused: ' .. reviews_before .. ' -> ' .. reviews_after)
     assert(rv.target.branch == 'agent/z' and not rv.target.commit and rv.mode ~= 'all', 'Review tab state changed by commit browsing')
+    local checkpoint = scm.git.exec(root, 'git', {'-c', 'user.name=T', '-c', 'user.email=t@x', 'commit-tree', 'HEAD^{tree}', '-m', 'checkpoint'})
+    run(root, {'update-ref', 'refs/t3/cp', (assert(checkpoint):gsub('%s+$', ''))})
+    local without = #mine.history
+    command.perform('scm:toggle-checkpoints')
+    wait(function() return #mine.history == without + 1 and not mine.worker end, 'Checkpoint not shown in history')
+    gv:select(#mine.history)
+    command.perform('scm:toggle-checkpoints')
+    wait(function() return #mine.history == without and not mine.worker end, 'Checkpoint not hidden again')
+    assert(gv.selected == without, 'History selection not clamped after reload: ' .. gv.selected .. ' of ' .. without)
     local syntax = require 'core.syntax'
     for file, name in pairs({['a.ts'] = 'TypeScript', ['a.tsx'] = 'TypeScript with JSX', ['a.jsx'] = 'JSX', ['a.json'] = 'JSON',
       ['a.rs'] = 'Rust', ['a.go'] = 'Go', ['a.zig'] = 'Zig', ['a.sh'] = 'Shell script', ['a.yaml'] = 'YAML', ['a.toml'] = 'TOML',

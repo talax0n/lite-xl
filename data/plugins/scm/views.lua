@@ -118,9 +118,10 @@ function Text:set_text(text)
   self:layout()
 end
 function Text:count_hunks() self.current_hunk = (self.current_hunk or 0) + 1; return self.current_hunk end
--- Syntax tokens for a diff line. A hunk is tokenized on first use, the old
--- side (context and deleted lines) and the new side (context and added lines)
--- each carrying its own tokenizer state.
+-- Syntax tokens for a diff line. A hunk is tokenized lazily up to the requested
+-- row and resumes there later, so a huge hunk costs only what has been drawn.
+-- The old side (context and deleted lines) and the new side (context and added
+-- lines) each carry their own tokenizer state.
 function Text:tokens(row)
   local file, band = row.file, row.band
   if not band then return nil end
@@ -128,14 +129,16 @@ function Text:tokens(row)
     local syn = syntax.get(file.path)
     file.syntax = syn ~= syntax.plain_text_syntax and #syn.patterns > 0 and syn
   end
-  if file.syntax and not band.tokenized then
-    band.tokenized = true
-    local syn, old, new = file.syntax, nil, nil
-    for _, r in ipairs(band.lines) do
+  local lines = band.lines
+  if file.syntax and not row.tokens and (band.next or 1) <= #lines then
+    local syn, i, old, new = file.syntax, band.next or 1, band.old, band.new
+    repeat
+      local r = lines[i]; i = i + 1
       if r.kind == "del" then r.tokens, old = tokenizer.tokenize(syn, r.text, old)
       elseif r.kind == "add" then r.tokens, new = tokenizer.tokenize(syn, r.text, new)
       elseif r.kind == "ctx" then r.tokens, new = tokenizer.tokenize(syn, r.text, new); old = select(2, tokenizer.tokenize(syn, r.text, old)) end
-    end
+    until r == row or i > #lines
+    band.next, band.old, band.new = i, old, new
   end
   return row.tokens
 end

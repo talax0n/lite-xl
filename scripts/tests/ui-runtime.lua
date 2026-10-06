@@ -121,6 +121,15 @@ function core.init(...)
     toks = sides:tokens(first_add(sides))
     assert(toks and toks[1] == 'keyword', 'Deleted line state leaked into the added line: ' .. tostring(toks and toks[1]))
     for _, r in ipairs(sides.rows) do assert(not (r.kind == 'ctx' and r.tokens), 'Undrawn hunk was tokenized') end
+    local big = {'diff --git a/f.lua b/f.lua\n@@ -0,0 +1,202 @@\n+local a = 1\n+--[[ open\n'}
+    for _ = 1, 200 do big[#big + 1] = '+x = 1\n' end
+    local long = views.Text('t', table.concat(big))
+    local adds = {}
+    for _, r in ipairs(long.rows) do if r.kind == 'add' then adds[#adds + 1] = r end end
+    long:tokens(adds[2])
+    assert(not adds[#adds].tokens, 'Whole hunk tokenized for an early row')
+    toks = long:tokens(adds[#adds])
+    assert(toks and toks[1] == 'comment', 'Comment state lost when tokenizing resumed: ' .. tostring(toks and toks[1]))
     assert(views.prompt and views.confirm, 'Shared prompt helpers missing')
     -- Commit review: unpushed commits on the main checkout.
     local review = require 'plugins.scm.review'
@@ -232,6 +241,15 @@ function core.init(...)
     rv:pane_pressed(rv.position.x + 20, rv.position.y + rv:toolbar_height() + (idx - 1) * plh + 2)
     wait(function() return not rv.loading and #rv.files == 1 and rv.files[1].path == 'f.lua' end, 'Pane commit click did not filter the diff')
     for _, a in ipairs(rv.actions) do assert(a.text ~= 'All changes', 'Old commit picker still in toolbar') end
+    local common = require 'core.common'
+    local files, drawn, draw_text = rv.files, {}, common.draw_text
+    rv.files = {{path = 'docs/' .. string.rep('long-name-', 12) .. '.md', adds = 12, dels = 3}}
+    common.draw_text = function(font, color, text, ...) drawn[text] = true; return draw_text(font, color, text, ...) end
+    rv:draw_pane()
+    common.draw_text, rv.files = draw_text, files
+    local cut
+    for text in pairs(drawn) do cut = cut or text:match('^long%-name%-.*…$') end
+    assert(cut and drawn['+12 −3'], 'Long file name not cut with an ellipsis beside its counts')
     scm.history(mine)
     local gv
     wait(function() gv = core.active_view; return gv:is(views.Graph) and #mine.history > 2 end, 'History tab did not open')
@@ -262,6 +280,12 @@ function core.init(...)
     wait(function() return cv.target.commit == string.rep('0', 40) and not cv.loading end, 'Unknown commit not shown in the same tab')
     assert(cv.missing and cv.rows[1].kind == 'banner' and cv.rows[1].text:find('Commit not found', 1, true), 'Missing commit banner absent')
     for _, a in ipairs(cv.actions) do assert(a.text ~= 'Previous' and a.text ~= 'Next', 'Unknown commit offers ' .. a.text) end
+    table.insert(mine.history, 1, {hash = string.rep('1', 40), subject = 'gone'})
+    review.show_commit(mine, string.rep('1', 40))
+    wait(function() return cv.target.commit == string.rep('1', 40) and not cv.loading end, 'Gone commit not shown')
+    assert(cv.missing, 'Gone commit not reported missing')
+    for _, a in ipairs(cv.actions) do assert(a.text ~= 'Previous' and a.text ~= 'Next', 'Missing commit in History offers ' .. a.text) end
+    table.remove(mine.history, 1)
     local reviews_after = 0
     for _, v in ipairs(core.root_view.root_node:get_children()) do if v:is(review.Review) then reviews_after = reviews_after + 1 end end
     assert(reviews_after == reviews_before + 1, 'Commit tab not reused: ' .. reviews_before .. ' -> ' .. reviews_after)

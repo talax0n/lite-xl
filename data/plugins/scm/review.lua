@@ -202,7 +202,7 @@ end
 function Review:update_actions()
   local t, a = self.target, {}
   if t.commit then
-    if history_index(t) then
+    if not self.missing and history_index(t) then
       a[1] = {text = "Previous", fn = function() self:step(-1) end}
       a[2] = {text = "Next", fn = function() self:step(1) end}
     end
@@ -552,9 +552,8 @@ function Review:draw_pane()
           right = right - d - px / 2
           renderer.draw_rect(right, ry + (lh - d) / 2, d, d, style.accent)
         end
-        core.push_clip_rect(nx, ry, math.max(0, right - nx - px / 2), lh)
-        common.draw_text(style.font, viewed and style.dim or style.text, f.path:match("[^/]+$") or f.path, nil, nx, ry, 0, lh)
-        core.pop_clip_rect()
+        local name = views.fit(style.font, f.path:match("[^/]+$") or f.path, math.max(0, right - nx - px / 2))
+        common.draw_text(style.font, viewed and style.dim or style.text, name, nil, nx, ry, 0, lh)
       end
     end
   end

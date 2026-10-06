@@ -50,7 +50,7 @@ function M.commits(t)
 end
 
 function M.show(t, hash)
-  return git.git(t.root, {"show", "--no-ext-diff", "--no-textconv", "--decorate", "--format=fuller", "--stat", "--patch", hash, "--"})
+  return git.git(t.root, {"show", "--no-ext-diff", "--no-textconv", "--diff-merges=first-parent", "--decorate", "--format=fuller", "--stat", "--patch", hash, "--"})
 end
 
 function M.head_lines(t, path)

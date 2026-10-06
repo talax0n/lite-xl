@@ -111,23 +111,18 @@ local function diff(repo, entry)
     show_output((entry.staged and "Staged: " or "Changes: ") .. entry.path, out ~= "" and out or "No text diff. This may be a binary file or submodule.", actions)
   end)
 end
-local function inspect(repo, commit)
-  git.enqueue(repo, "Inspect commit", function()
-    return git.git(repo, {"show", "--no-ext-diff", "--no-textconv", "--decorate", "--format=fuller", "--stat", "--patch", commit.hash, "--"})
-  end, function(out)
-    if out then show_output(commit.hash:sub(1, 8) .. ": " .. commit.subject, out, {
-      {text = "Copy hash", fn = function() system.set_clipboard(commit.hash) end},
-      {text = "Compare with HEAD", fn = function() show_git(repo, "Compare commit", {"diff", "--no-ext-diff", "--no-textconv", commit.hash, "HEAD", "--"}) end},
-      {text = "Open on GitHub", fn = function()
-        git.enqueue(repo, "Open commit on GitHub", function() return git.exec(repo.root, "gh", {"browse", commit.hash}) end)
-      end},
-      {text = "Revert", fn = function()
-        confirm("Revert commit", "Create a commit reverting " .. commit.hash:sub(1, 8) .. "?", function() operation(repo, "Revert", {"revert", "--no-edit", commit.hash}) end)
-      end},
-      {text = "Cherry-pick", fn = function() confirm("Cherry-pick", "Apply " .. commit.hash:sub(1, 8) .. " to the current branch?", function() operation(repo, "Cherry-pick", {"cherry-pick", commit.hash}) end) end},
-    }) end
-  end)
+local function commit_actions(repo)
+  return function(hash) return {
+    {text = "Copy hash", fn = function() system.set_clipboard(hash) end},
+    {text = "Compare with HEAD", fn = function() show_git(repo, "Compare commit", {"diff", "--no-ext-diff", "--no-textconv", hash, "HEAD", "--"}) end},
+    {text = "Revert", fn = function()
+      confirm("Revert commit", "Create a commit reverting " .. hash:sub(1, 8) .. "?", function() operation(repo, "Revert", {"revert", "--no-edit", hash}) end)
+    end},
+    {text = "Cherry-pick", fn = function() confirm("Cherry-pick", "Apply " .. hash:sub(1, 8) .. " to the current branch?", function() operation(repo, "Cherry-pick", {"cherry-pick", hash}) end) end},
+    {text = "GitHub", fn = function() git.enqueue(repo, "Open commit on GitHub", function() return git.exec(repo.root, "gh", {"browse", hash}) end) end},
+  } end
 end
+local function inspect(repo, commit) review.show_commit(repo, commit.hash, commit_actions(repo)) end
 local function history(repo)
   git.history(repo, function() views.open(views.Graph(repo, git, function(commit) inspect(repo, commit) end)) end, true)
 end

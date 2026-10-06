@@ -26,6 +26,9 @@ local function saved_list(root)
   table.sort(list)
   return list
 end
+local function history_index(t)
+  for i, c in ipairs(t.repo and t.repo.history or {}) do if c.hash == t.commit then return i end end
+end
 
 function Review:new(target)
   Review.super.new(self, "Review", "")
@@ -33,7 +36,14 @@ function Review:new(target)
   self.doc, self.viewed, self.blobs, self.all_rows = {notes = {}, extra = {}}, {}, {}, {}
   self:reload()
 end
-function Review:get_name() return "Review: " .. (self.target.branch or self.target.root:match("[^/]+$")) end
+function Review:get_name()
+  local t = self.target
+  if t.commit then
+    local i = history_index(t)
+    return "Commit: " .. t.commit:sub(1, 8) .. (i and "  " .. t.repo.history[i].subject or "")
+  end
+  return "Review: " .. (t.branch or t.root:match("[^/]+$"))
+end
 
 function Review:reload()
   if self.loading then self.reload_again = true; return end
@@ -49,6 +59,15 @@ end
 
 function Review:load()
   local t = self.target
+  if t.commit then
+    local text = ops.show(t, t.commit)
+    self.missing, self.state = not text, {}
+    self:set_text(text or "")
+    self.all_rows = self.rows
+    self.scroll.y, self.scroll.to.y = 0, 0
+    self:build(); self:update_actions()
+    return
+  end
   self.state = ops.state(t)
   local text, err = "", nil
   if t.base then
@@ -127,6 +146,12 @@ end
 function Review:build()
   local rows, t = {}, self.target
   local function add(row) rows[#rows + 1] = row end
+  if t.commit then
+    if self.missing then add({kind = "banner", color = style.warn, text = "Commit not found: " .. t.commit:sub(1, 8)}) end
+    for _, row in ipairs(self.all_rows) do add(row) end
+    self.rows = rows; self:layout(); core.redraw = true
+    return
+  end
   if self.state.busy then add({kind = "banner", color = style.warn, text = "A " .. self.state.busy .. " is in progress: finish it before pushing or merging"}) end
   if not t.branch then add({kind = "banner", color = style.warn, text = "Detached HEAD: check out a branch to push or merge"}) end
   if #self.fixes > 0 then
@@ -176,6 +201,13 @@ end
 
 function Review:update_actions()
   local t, a = self.target, {}
+  if t.commit then
+    a[1] = {text = "Previous", fn = function() self:step(-1) end}
+    a[2] = {text = "Next", fn = function() self:step(1) end}
+    if not self.missing and t.actions then for _, x in ipairs(t.actions(t.commit)) do a[#a + 1] = x end end
+    self.actions = a
+    return
+  end
   a[#a + 1] = {text = (t.branch or "detached") .. " vs " .. (t.base or "?"), fn = function() self:pick_target() end}
   a[#a + 1] = {text = self.mode == "all" and "All changes" or self.mode:sub(1, 8), fn = function() self:pick_commit() end}
   a[#a + 1] = {text = "Note", fn = function() self:general_note() end}
@@ -202,6 +234,7 @@ function Review:persist(doc_changed, viewed_changed)
 end
 
 function Review:toggle_viewed(path, value)
+  if self.target.commit then return end
   if value == nil then value = not self:is_viewed(path) end
   self.viewed[path] = value and self.blobs[path] or nil
   self:build(); self:update_actions(); self:persist(false, true)
@@ -220,10 +253,22 @@ function Review:viewed_next()
 end
 
 function Review:retarget(t)
-  M.saved[t.root] = M.saved[t.root] or {}
+  if not t.commit then M.saved[t.root] = M.saved[t.root] or {} end
   self.target, self.mode, self.sel_from, self.sel_to = t, "all", nil, nil
   self.scroll.y, self.scroll.to.y = 0, 0
   self:reload()
+end
+
+-- Previous = newer, Next = older, in History order; Next past the loaded
+-- page loads the next one first.
+function Review:step(d)
+  local t = self.target
+  local i = history_index(t)
+  if not i or i + d < 1 then return end
+  local function go() local c = t.repo.history[i + d]; if c then self:retarget(M.commit_target(t.repo, c.hash, t.actions)) end end
+  if i + d > #t.repo.history then
+    if not t.repo.history_done then git.history(t.repo, go) end
+  else go() end
 end
 
 function Review:pick_commit()
@@ -270,6 +315,7 @@ function Review:anchor_row(row)
 end
 
 function Review:add_note(row, text)
+  if self.target.commit then return end
   local a = self:anchor_row(self.sel_from or row)
   local b = self:anchor_row(self.sel_to or self.sel_from or row)
   if not a or not b or a.file ~= b.file then core.error("Pick lines from one file, or add a general note"); return end
@@ -304,6 +350,7 @@ function Review:delete_note(n)
 end
 
 function Review:general_note(text)
+  if self.target.commit then return end
   local function save(body)
     body = body:gsub("[\r\n]+", " ")
     if body:match("^%s*$") then return end
@@ -593,7 +640,22 @@ end
 function M.show(t)
   M.saved[t.root] = M.saved[t.root] or {}
   for _, v in ipairs(core.root_view.root_node:get_children()) do
-    if v:is(Review) then
+    if v:is(Review) and not v.target.commit then
+      v:retarget(t)
+      core.root_view.root_node:get_node_for_view(v):set_active_view(v)
+      return v
+    end
+  end
+  return views.open(Review(t))
+end
+
+function M.commit_target(repo, hash, actions) return {root = repo.root, main_root = repo.root, repo = repo, commit = hash, actions = actions} end
+
+-- One commit tab, separate from the review tab so browsing keeps review state.
+function M.show_commit(repo, hash, actions)
+  local t = M.commit_target(repo, hash, actions)
+  for _, v in ipairs(core.root_view.root_node:get_children()) do
+    if v:is(Review) and v.target.commit then
       v:retarget(t)
       core.root_view.root_node:get_node_for_view(v):set_active_view(v)
       return v
@@ -642,7 +704,9 @@ command.add(Review, {
   ["review:general-note"] = function(v) v:general_note() end,
   ["review:copy-notes"] = function(v) v:copy_notes() end,
   ["review:viewed-and-next"] = function(v) v:viewed_next() end,
+  ["review:previous-commit"] = function(v) v:step(-1) end,
+  ["review:next-commit"] = function(v) v:step(1) end,
 })
-keymap.add({c = "review:add-note", v = "review:viewed-and-next"})
+keymap.add({c = "review:add-note", v = "review:viewed-and-next", ["["] = "review:previous-commit", ["]"] = "review:next-commit"})
 
 return M

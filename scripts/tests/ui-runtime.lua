@@ -222,6 +222,25 @@ function core.init(...)
     keymap.on_key_pressed('down'); keymap.on_key_pressed('down'); keymap.on_key_pressed('up')
     assert(gv.selected == 1, 'Arrow keys did not move History selection: ' .. tostring(gv.selected))
     gv:draw()
+    os.remove(root .. '/.trex/viewed')
+    local reviews_before = 0
+    for _, v in ipairs(core.root_view.root_node:get_children()) do if v:is(review.Review) then reviews_before = reviews_before + 1 end end
+    keymap.on_key_pressed('down'); keymap.on_key_pressed('return')
+    local cv
+    wait(function() cv = core.active_view; return cv:is(review.Review) and cv.target.commit == mine.history[2].hash and not cv.loading end, 'Commit tab did not open')
+    assert(#cv.files > 0 and cv:get_name():find(mine.history[2].hash:sub(1, 8), 1, true), 'Commit tab empty or misnamed')
+    keymap.on_key_pressed(']')
+    wait(function() return cv.target.commit == mine.history[3].hash and not cv.loading end, '] did not move to the older commit')
+    keymap.on_key_pressed('[')
+    wait(function() return cv.target.commit == mine.history[2].hash and not cv.loading end, '[ did not move back')
+    keymap.on_key_pressed('v'); cv:add_note(cv.rows[#cv.rows], 'x')
+    assert(not read(root .. '/.trex/review.md') and not read(root .. '/.trex/viewed'), 'Commit tab wrote review state')
+    review.show_commit(mine, string.rep('0', 40))
+    wait(function() return cv.target.commit == string.rep('0', 40) and not cv.loading end, 'Unknown commit not shown in the same tab')
+    assert(cv.missing and cv.rows[1].kind == 'banner' and cv.rows[1].text:find('Commit not found', 1, true), 'Missing commit banner absent')
+    local reviews_after = 0
+    for _, v in ipairs(core.root_view.root_node:get_children()) do if v:is(review.Review) then reviews_after = reviews_after + 1 end end
+    assert(reviews_after == reviews_before + 1, 'Commit tab not reused: ' .. reviews_before .. ' -> ' .. reviews_after)
     local syntax = require 'core.syntax'
     for file, name in pairs({['a.ts'] = 'TypeScript', ['a.tsx'] = 'TypeScript with JSX', ['a.jsx'] = 'JSX', ['a.json'] = 'JSON',
       ['a.rs'] = 'Rust', ['a.go'] = 'Go', ['a.zig'] = 'Zig', ['a.sh'] = 'Shell script', ['a.yaml'] = 'YAML', ['a.toml'] = 'TOML',

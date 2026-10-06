@@ -80,13 +80,14 @@ settings are accessible through the integrated terminal or GitHub website.
 ### GitHub activity panel
 
 The chart icon in the activity bar (`github:toggle`) opens a panel on the right
-with your own GitHub activity. It shows contribution counts for today, this
-week, this month and this year, a year heatmap with the current and longest
-streak, your open pull requests, pull requests waiting for your review, and
-your recent pushes. Clicking a row opens it in the browser.
+with your own GitHub activity. A streak card at the top shows this year's total
+contributions and your current and longest streaks with their date ranges.
+Below it are contribution counts for today, this week, this month and this
+year, a year heatmap, a bar splitting this year's contributions into commits,
+pull requests, issues, reviews and private work, weekly totals for the last
+26 weeks, totals by weekday, and your best day and daily average.
 
-Data comes from the signed-in GitHub CLI (`gh api graphql` and the events
-feed). The panel refreshes on first open, every 10 minutes while visible, and
+Data comes from the signed-in GitHub CLI (`gh api graphql`). The panel refreshes on first open, every 10 minutes while visible, and
 from its Refresh button. Counts are contributions, the same figure as the
 profile graph, so private organization work is included. Each tile also shows
 how many of those are publicly visible commits. The heatmap and streak use

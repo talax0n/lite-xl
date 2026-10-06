@@ -7,22 +7,22 @@ Status: approved in chat, awaiting spec review
 
 The user wants to see their own GitHub activity without leaving TreX: how
 much they contributed today and over longer windows, their contribution
-heatmap and streak, and the PRs and pushes that need attention. It lives in
-a panel docked on the right.
+heatmap and streak, and charts of how their contributions break down. It
+lives in a panel docked on the right.
 
 Success: one click on a new activity-bar icon opens a right-side panel
-showing counts for Today / This week / This month / This year, a year
-heatmap with current and longest streak, and three clickable lists (my open
-PRs, PRs waiting for my review, my recent pushes). Clicking a row opens it
-on GitHub.
+showing a streak card (year total, current and longest streak with date
+ranges), counts for Today / This week / This month / This year, a year
+heatmap, and charts: contribution types this year, weekly totals for the
+last 26 weeks, totals by weekday, best day and daily average.
 
-Out of scope: profile card, top repos, other users, writing to GitHub
-(merging, commenting), local-git counts.
+Out of scope: PR, review and push lists (removed 2026-10-07), profile card,
+top repos, other users, writing to GitHub, local-git counts.
 
 ## Data source
 
 All data comes from the `gh` CLI already logged in on the machine
-(`gh api graphql`, `gh api /users/<login>/events`). No token handling in
+(`gh api graphql`). No token handling in
 TreX.
 
 Known limit, measured on the user's account: GitHub reports private
@@ -44,14 +44,13 @@ contributions. Therefore:
 model = {
   login = "talax0n",
   windows = {            -- in this order
-    {label = "Today",      contributions = 85, commits = 0},
+    {label = "Today", contributions = 85, commits = 0,
+     kinds = {commits = 0, prs = 0, issues = 0, reviews = 0, private = 85}},
     {label = "This week",  ...}, {label = "This month", ...}, {label = "This year", ...},
   },
   days = {{date = "2026-01-01", count = 3}, ...},  -- year calendar, oldest first
-  streak = {current = 12, longest = 40},
-  prs = {{title, repo, url, updated}},             -- my open PRs, newest first, max 10
-  reviews = {{title, repo, url, updated}},         -- review-requested:@me, open, max 10
-  pushes = {{repo, branch, url, at}},              -- PushEvents, newest first, max 10
+  streak = {current = 43, longest = 43,           -- ranges are ISO dates, nil when 0
+    current_from = "2026-08-25", current_to = "2026-10-06", longest_from = ..., longest_to = ...},
   fetched_at = <os.time>, error = nil | "message",
 }
 ```
@@ -65,15 +64,16 @@ model = {
   month, Jan 1st of this year.
 - `query(windows)` → one GraphQL query string with aliased
   `contributionsCollection(from:)` per window (to defaults to now), the
-  year `contributionCalendar` (on the This-year alias),
-  `viewer.login`, `viewer.pullRequests(states: OPEN, first: 10,
-  orderBy: UPDATED_AT DESC)` and `search(query: "is:pr is:open
-  review-requested:@me", type: ISSUE, first: 10)`.
-- `parse(graphql_json, events_json)` → `model` (without `fetched_at`).
-  Pushes keep only `PushEvent`; branch is `payload.ref` without
-  `refs/heads/`; url is `https://github.com/<repo>/commit/<payload.head>`.
-- `streak(days, today)` → `{current, longest}`. Current counts back from
-  today; if today is 0 it counts back from yesterday (today isn't over).
+  year `contributionCalendar` (on the This-year alias) and `viewer.login`.
+- `parse(graphql_json)` → `model` (without `streak` and `fetched_at`).
+- `streak(days, today)` → `{current, longest, current_from, current_to,
+  longest_from, longest_to}`. Current counts back from today; if today is 0
+  it counts back from yesterday (today isn't over).
+- `weekly(days, today, n)` → `n` totals of 7-day buckets, the last ending
+  today, oldest first. `weekdays(days, today)` → 7 totals, Monday first.
+  `best_day(days, today)` → the first busiest day. `average(days, today)` →
+  contributions per calendar day up to today. `short_date("2026-08-25")` →
+  `"Aug 25"`.
 - Uses `plugins.lsp.json` for decoding.
 
 ### `data/plugins/github.lua` (panel)
@@ -85,18 +85,21 @@ model = {
   `data/plugins/toolbarview.lua` after Backlog, symbol from the icon font,
   active when the panel is visible.
 - Fetch runs in a coroutine through `scm/git.lua`'s `exec(cwd, "gh",
-  args)` (non-blocking, finds `/opt/homebrew/bin/gh`): GraphQL first, then
-  `api /users/<login>/events?per_page=50`.
+  args)` (non-blocking, finds `/opt/homebrew/bin/gh`), one GraphQL call.
 - Refresh on first open, every 10 minutes while visible, and on the
   header refresh button. One fetch at a time.
 - Layout, top to bottom: header (`GITHUB · <login>`, refresh button, "updated
-  N min ago"), 2×2 tiles (big contributions number, label, "N commits"),
-  heatmap (53 columns × 7 rows, cell size fit to width, a dim empty cell and
-  4 GitHub greens by quartile), streak line, then sections MY PULL
-  REQUESTS, REVIEW REQUESTS, RECENT PUSHES. Rows show title / repo and a
-  relative time; empty sections say "None". Long text cut with `…`.
-- Clicking a row opens its url with `open` (`system.exec`). Mouse wheel
-  scrolls.
+  N min ago"); streak card modelled on github-readme-streak-stats (rounded
+  card, 1px light border, three columns: year total in blue with "Jan 1 -
+  Present", current streak in purple inside a ring with a flame in its top
+  gap, longest streak in blue; date ranges in teal); 2×2 tiles (big
+  contributions number, label, "N commits"); heatmap (53 columns × 7 rows,
+  cell size fit to width, a dim empty cell and 4 GitHub greens by quartile);
+  CONTRIBUTION TYPES (one stacked bar for this year, legend with counts);
+  WEEKLY ACTIVITY (26 vertical bars, max labelled); BY WEEKDAY (7 horizontal
+  bars, busiest highlighted); a line "Best day N on Mon D · Avg N/day".
+  The renderer only draws rectangles, so the rounded corners, ring and
+  flame are built from rows and dots of `draw_rect`. Mouse wheel scrolls.
 
 ## Errors
 
@@ -104,8 +107,6 @@ model = {
   panel body says "Run `gh auth login` in a terminal, then refresh."
 - Network or API error with earlier data → keep the data, show
   "Couldn't refresh: <first line of error>" under the header.
-- Partial: events call fails but GraphQL works → show everything else,
-  RECENT PUSHES says "Unavailable".
 
 ## Testing
 
@@ -113,12 +114,12 @@ model = {
    - `windows` for a fixed `now` (a Wednesday mid-month) gives today's
      midnight, that Monday, the 1st, Jan 1st.
    - `streak`: run ending today; run ending yesterday with today 0; gap
-     resets current; longest picks the longest run.
-   - `parse` on a saved fixture (GraphQL + events JSON) gives the expected
-     window totals (restricted included), commit counts, PR rows, and push
-     rows (non-PushEvents dropped, branch stripped, commit url).
+     resets current; longest picks the longest run; each with its dates.
+   - `weekly`, `weekdays`, `best_day`, `average` on fixed day lists.
+   - `parse` on a saved GraphQL fixture gives the expected window totals
+     (restricted included), commit counts and kind breakdown, and no lists.
 2. UI runtime (`scripts/tests/ui-runtime.lua`): set a model directly,
-   toggle the panel, draw it, click the first PR row and assert the opened
-   url (stub the opener); auth-error model shows the login hint.
+   toggle the panel, draw it and assert the card, legend, chart and stats
+   text; auth-error model shows the login hint.
 3. Screenshot of the panel with live data, read before reporting.
 4. `docs/ide-features.md` gains a short GitHub panel section.

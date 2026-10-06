@@ -167,13 +167,20 @@ function M.history(repo, done, reset)
   if reset then repo.history = {}; repo.history_done = false end
   if repo.history_done or #repo.history >= 2000 then if done then done() end; return end
   M.enqueue(repo, "Loading history", function()
+    repo.unpushed = repo.unpushed or {}
     if repo.status.head == "(initial)" then repo.history_done = true; return true end
-    local out, err = M.git(repo, {"log", "--all", "--date-order", "--max-count=100", "--skip=" .. #repo.history,
-      "--format=%H%x00%P%x00%an%x00%aI%x00%D%x00%s%x00"})
+    local settings = config.plugins and config.plugins.scm or {}
+    local args = {"log", "--all", "--date-order", "--max-count=100", "--skip=" .. #repo.history, "--format=%H%x00%P%x00%an%x00%aI%x00%D%x00%s%x00"}
+    -- T3 Code records a checkpoint commit per agent turn under refs/t3/.
+    if not settings.show_checkpoints then table.insert(args, 2, "--exclude=refs/t3/*") end
+    local out, err = M.git(repo, args)
     if not out then return nil, err end
     local page = parse.log(out)
     for _, commit in ipairs(page) do repo.history[#repo.history + 1] = commit end
     repo.history_done = #page < 100; parse.graph(repo.history)
+    local unpushed = {}
+    for hash in ((repo.status.upstream and M.git(repo, {"rev-list", "@{upstream}..HEAD"})) or ""):gmatch("%x+") do unpushed[hash] = true end
+    repo.unpushed = unpushed
     return true
   end, function(result) if result and done then done() end end)
 end

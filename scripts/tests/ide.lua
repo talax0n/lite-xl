@@ -96,6 +96,20 @@ end)
 git.refresh(git.repositories[1]); drain(); check(#errors == 0, table.concat(errors, '\n'))
 check(git.repositories[1].status.branch == 'main', 'Queued status refresh')
 git.history(git.repositories[1]); drain(); check(#git.repositories[1].history > 0, 'Queued history')
+local r1 = git.repositories[1]
+run(function()
+  local hash = g(r1.root, {'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 't3 checkpoint'}):gsub('%s+$', '')
+  g(r1.root, {'update-ref', 'refs/t3/x', hash})
+end)
+local function has_checkpoint() for _, c in ipairs(r1.history) do if c.subject == 't3 checkpoint' then return true end end return false end
+git.history(r1, nil, true); drain(); check(#r1.history > 0 and not has_checkpoint(), 'Checkpoints hidden from history')
+local ahead = {}
+run(function() for h in g(r1.root, {'rev-list', '@{upstream}..HEAD'}):gmatch('%x+') do ahead[#ahead + 1] = h end end)
+local marked = 0; for _ in pairs(r1.unpushed) do marked = marked + 1 end
+check(#ahead == 1 and r1.unpushed[ahead[1]] and marked == 1, 'Unpushed commits marked')
+package.loaded['core.config'].plugins = {scm = {show_checkpoints = true}}
+git.history(r1, nil, true); drain(); check(has_checkpoint(), 'Checkpoints shown when enabled')
+package.loaded['core.config'].plugins = nil
 local function screen_text(term, offset)
   local screen, lines = term:screen(offset), {}
   for _, runs in ipairs(screen) do local text = {}; for _, run in ipairs(runs) do text[#text + 1] = run[1] end; lines[#lines + 1] = table.concat(text) end

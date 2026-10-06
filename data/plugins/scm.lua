@@ -10,7 +10,7 @@ local git = require "plugins.scm.git"
 local views = require "plugins.scm.views"
 local review = require "plugins.scm.review"
 
-config.plugins.scm = common.merge({width = 320, refresh_interval = 5, fetch_interval = 180, discovery_depth = 3, discovery_limit = 100}, config.plugins.scm)
+config.plugins.scm = common.merge({width = 320, refresh_interval = 5, fetch_interval = 180, discovery_depth = 3, discovery_limit = 100, show_checkpoints = false}, config.plugins.scm)
 local options = config.plugins.scm
 local panel, selected_repo, selected_file
 local explorer_was_visible
@@ -464,6 +464,11 @@ local commands = {
     core.add_thread(function() local out, err = git.git(path, {"init"}); if out then local repo = git.add(path); if repo then selected_repo = repo; git.refresh(repo) end else core.error("%s", err) end end)
   end, core.root_project().path) end,
   ["scm:history"] = function() with_repo(history) end,
+  ["scm:toggle-checkpoints"] = function()
+    options.show_checkpoints = not options.show_checkpoints
+    for _, repo in ipairs(git.repositories) do repo.graph_head = nil; git.history(repo, nil, true) end
+    core.log("T3 checkpoints %s in history", options.show_checkpoints and "shown" or "hidden")
+  end,
   ["scm:review"] = function() with_repo(function(repo) review.open(repo.root) end) end,
   ["scm:stage-all"] = function() with_repo(stage_all) end,
   ["scm:unstage-all"] = function() with_repo(unstage_all) end,

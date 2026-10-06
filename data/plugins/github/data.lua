@@ -48,11 +48,14 @@ end
 local function pushes(events)
   local rows = {}
   for _, e in ipairs(events) do
-    if e.type == "PushEvent" and e.payload and #rows < MAX_ROWS then
+    if e.type == "PushEvent" and e.payload then
       rows[#rows + 1] = {repo = e.repo.name, branch = (e.payload.ref or ""):gsub("^refs/heads/", ""),
         url = "https://github.com/" .. e.repo.name .. "/commit/" .. (e.payload.head or ""), at = e.created_at}
     end
   end
+  -- The events feed is in ingestion order, not push time.
+  table.sort(rows, function(a, b) return a.at > b.at end)
+  for i = #rows, MAX_ROWS + 1, -1 do rows[i] = nil end
   return rows
 end
 

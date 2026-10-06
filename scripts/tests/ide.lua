@@ -420,7 +420,8 @@ do
     .. ',"w4":{"totalCommitContributions":4,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":300,'
     .. '"contributionCalendar":{"weeks":[{"contributionDays":[{"date":"2026-01-01","contributionCount":3},{"date":"2026-01-02","contributionCount":0}]},{"contributionDays":[{"date":"2026-01-03","contributionCount":5}]}]}},'
     .. '"pullRequests":{"nodes":[' .. pr .. ']}},"search":{"nodes":[' .. pr:gsub('Fix it', 'Review me') .. ',{}]}}}'
-  local events = '[{"type":"PushEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T21:00:00Z","payload":{"ref":"refs/heads/main","head":"abc123","commits":[]}},'
+  local events = '[{"type":"PushEvent","repo":{"name":"o/old"},"created_at":"2026-10-05T09:00:00Z","payload":{"ref":"refs/heads/dev","head":"def456"}},'
+    .. '{"type":"PushEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T21:00:00Z","payload":{"ref":"refs/heads/main","head":"abc123","commits":[]}},'
     .. '{"type":"PullRequestEvent","repo":{"name":"o/r"},"created_at":"2026-10-06T20:00:00Z","payload":{}}]'
   local model = assert(gh.parse(graphql, events))
   check(model.login == 'me' and model.windows[1].label == 'Today' and model.windows[1].contributions == 88 and model.windows[1].commits == 0, 'GitHub contributions include restricted ones')
@@ -428,7 +429,7 @@ do
   check(#model.days == 3 and model.days[3].date == '2026-01-03' and model.days[3].count == 5, 'GitHub calendar flattened oldest first')
   check(#model.prs == 1 and model.prs[1].title == 'Fix it' and model.prs[1].repo == 'o/r' and model.prs[1].url == 'https://github.com/o/r/pull/1', 'GitHub PR rows')
   check(#model.reviews == 1 and model.reviews[1].title == 'Review me', 'GitHub review rows skip non-PR results')
-  check(#model.pushes == 1 and model.pushes[1].branch == 'main' and model.pushes[1].url == 'https://github.com/o/r/commit/abc123' and model.pushes[1].at == '2026-10-06T21:00:00Z', 'GitHub push rows')
+  check(#model.pushes == 2 and model.pushes[2].repo == 'o/old' and model.pushes[1].branch == 'main' and model.pushes[1].url == 'https://github.com/o/r/commit/abc123' and model.pushes[1].at == '2026-10-06T21:00:00Z', 'GitHub push rows, newest first')
   check(gh.parse(graphql, nil).pushes == nil, 'GitHub pushes unavailable without events')
   check(not gh.parse('{"errors":[{"message":"Bad credentials"}]}'), 'GitHub API errors fail the parse')
 end

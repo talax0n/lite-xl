@@ -160,6 +160,6 @@ if host_machine.system() != 'windows'
     )
     test('source-control-and-terminal', ide_tests,
         args: [meson.project_source_root() / 'scripts/tests/ide.lua'],
-        workdir: meson.project_source_root(), timeout: 120,
+        workdir: meson.project_source_root(), timeout: 120, env: {'IDE_TEST_RUNNER': ide_tests.full_path()},
     )
 endif

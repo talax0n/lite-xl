@@ -297,5 +297,46 @@ do
     children = {{name = 'b', selectionRange = {start = {line = 4, character = 2}, ['end'] = {line = 4, character = 3}}}}}}, 'file:///s')
   check(locs[1].uri == 'file:///a' and locs[1].end_character == 5 and syms[2].name == 'A.b' and syms[2].line == 4 and syms[2].uri == 'file:///s', 'Locations and symbols flattened')
 end
+-- Language server client against the fake server.
+do
+  local client = require 'plugins.lsp.client'
+  local util = require 'plugins.lsp.util'
+  core.log = core.log or function() end
+  local function wait(cond, what)
+    local limit = system.get_time() + 15
+    while not cond() do
+      for _, co in ipairs(threads) do
+        if coroutine.status(co) == 'suspended' then local ok, err = coroutine.resume(co); assert(ok, err) end
+      end
+      assert(system.get_time() < limit, what)
+      system.sleep(5)
+    end
+  end
+  local spec = {name = 'fake', label = 'Fake', short = 'fake', files = {'%.ts$'}, id = 'typescript', roots = {},
+    cmd = {system.absolute_path(os.getenv('IDE_TEST_RUNNER') or 'build/src/ide-test-runner'), system.absolute_path('scripts/tests/fake-lsp.lua')},
+    env = {TREX_DATA = system.absolute_path('data')}}
+  local root = tmp .. '/lsp-root/pkg'
+  local doc = {abs_filename = root .. '/src/a é.ts', lines = {'const answer = 42\n', '\n', 'const answer2 = answer\n'}}
+  local c = client.get(spec, root)
+  client.open(c, doc)
+  wait(function() return c.state == 'ready' and client.diagnostics[doc.abs_filename] end, 'Fake server ready with diagnostics')
+  local d = client.diagnostics[doc.abs_filename][1]
+  check(d.line1 == 1 and d.col1 == 7 and d.col2 == 13 and d.message == 'answer is not a question', 'Diagnostics from server')
+  wait(function() for _, l in ipairs(c.log) do if l == 'configured 1' then return true end end end, 'Server request not answered')
+  check(true, 'Server request answered')
+  local hover
+  client.request(c, 'textDocument/hover', {textDocument = {uri = util.path_to_uri(doc.abs_filename)}, position = {line = 0, character = 7}},
+    function(r) hover = r end)
+  wait(function() return hover end, 'Hover not answered')
+  check(util.hover_text(hover.contents) == 'const answer: number', 'Hover result')
+  local old = c.rpc
+  client.diagnostics[doc.abs_filename] = nil
+  old:kill()
+  wait(function() return c.state == 'ready' and c.rpc ~= old and client.diagnostics[doc.abs_filename] end, 'Not restarted after crash')
+  check(#c.crashes == 1, 'Crash restart reopens documents')
+  client.close(c, doc); client.stop(c)
+  wait(function() return c.rpc == nil end, 'Server not shut down')
+  check(client.clients[c.key] == nil, 'Stopped client forgotten')
+end
 assert(os.execute('rm -rf ' .. tmp))
 print(string.format('PASS: %d checks against real Git repositories and a native PTY', checks))

@@ -25,18 +25,25 @@ local function needs_login(err)
   return e:find("auth", 1, true) or e:find("logged in", 1, true) or e:find("could not start", 1, true) or e:find("no such file", 1, true)
 end
 
+local function load()
+  local query = data.query(data.windows(os.time()))
+  local out, err = git.exec(USERDIR, "gh", {"api", "graphql", "-f", "query=" .. query}, nil, 30)
+  if not out then return nil, err end
+  local model, parse_err = data.parse(out)
+  if not model then return nil, parse_err end
+  local events = git.exec(USERDIR, "gh", {"api", "/users/" .. model.login .. "/events?per_page=50"}, nil, 30)
+  model = data.parse(out, events)
+  model.streak = data.streak(model.days, os.date("!%Y-%m-%d"))
+  model.fetched_at = os.time()
+  return model
+end
+
 local function fetch()
   M.status = {state = "loading", at = os.time()}
   core.redraw = true
-  local query = data.query(data.windows(os.time()))
-  local out, err = git.exec(USERDIR, "gh", {"api", "graphql", "-f", "query=" .. query}, nil, 30)
-  local model
-  if out then model, err = data.parse(out) end
+  local ok, model, err = pcall(load)
+  if not ok then model, err = nil, model end
   if model then
-    local events = git.exec(USERDIR, "gh", {"api", "/users/" .. model.login .. "/events?per_page=50"}, nil, 30)
-    model = data.parse(out, events)
-    model.streak = data.streak(model.days, os.date("!%Y-%m-%d"))
-    model.fetched_at = os.time()
     M.model, M.status = model, {state = "ok", at = M.status.at}
   else
     M.status = {state = needs_login(err) and "auth" or "error", error = first_line(err), at = M.status.at}
@@ -44,7 +51,11 @@ local function fetch()
   core.redraw = true
 end
 
-function M.refresh() if M.status.state ~= "loading" then core.add_thread(fetch) end end
+function M.refresh()
+  if M.status.state == "loading" then return end
+  M.status = {state = "loading", at = os.time()}
+  core.add_thread(fetch)
+end
 
 local GitHub = View:extend()
 local panel

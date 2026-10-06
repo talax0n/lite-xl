@@ -107,6 +107,7 @@ function core.init(...)
     command.perform('backlog:toggle')
     assert(not bp.visible, 'Backlog did not hide')
     local github = require 'plugins.github'
+    local gh_git, gh_data = require 'plugins.scm.git', require 'plugins.github.data'
     local argv, shell
     local process_start, system_exec = process.start, system.exec
     process.start = function(cmd) argv = cmd; return {} end
@@ -114,6 +115,19 @@ function core.init(...)
     github.open_url('https://github.com/o/r/pull/1?$(touch x)')
     process.start, system.exec = process_start, system_exec
     assert(type(argv) == 'table' and argv[1] == 'open' and argv[2] == 'https://github.com/o/r/pull/1?$(touch x)' and not shell, 'GitHub url went through the shell: ' .. tostring(shell))
+    local exec, parse = gh_git.exec, gh_data.parse
+    local fetches = 0
+    gh_git.exec = function(cwd, executable, ...)
+      if executable ~= 'gh' then return exec(cwd, executable, ...) end
+      fetches = fetches + 1; coroutine.yield(0.01); return '{}'
+    end
+    gh_data.parse = function() error('missing field') end
+    github.status = {state = 'idle'}
+    github.refresh(); github.refresh()
+    for _ = 1, 40 do coroutine.yield(0.05); if fetches > 0 and github.status.state ~= 'loading' then break end end
+    gh_git.exec, gh_data.parse = exec, parse
+    assert(fetches == 1, 'Two refreshes started ' .. fetches .. ' fetches')
+    assert(github.status.state == 'error', 'GitHub fetch whose parse throws ended in ' .. github.status.state)
     local opened
     github.open_url = function(url) opened = url end
     github.model = {login = 'me', fetched_at = os.time(),

@@ -260,6 +260,24 @@ function core.init(...)
     tdv.doc:set_selection(3, 1)
     lsp.next_problem(tdv, 1)
     assert(select(1, tdv.doc:get_selection()) == 1 and lsp.hover_state().text:find('fake(7)', 1, true), 'Next problem did not wrap to line 1')
+    local published = lsp.client.diagnostics_for(ts)
+    tdv.doc:remove(2, 1, 3, math.huge)
+    wait(function() return lsp.client.diagnostics_for(ts) ~= published end, 'Shrink not synced')
+    local stale = {line1 = 5, col1 = 3, line2 = 5, col2 = 40, severity = 1, message = 'stale'}
+    lsp.client.diagnostics[ts] = {{line1 = 2, col1 = 1, line2 = 2, col2 = 40, severity = 2, message = 'past the end'}, stale}
+    lsp.client.generation = lsp.client.generation + 1
+    core.redraw = true
+    coroutine.yield(0.1)
+    tdv.doc:set_selection(2, 1)
+    lsp.next_problem(tdv, 1)
+    local l, c1 = tdv.doc:get_selection()
+    assert(#tdv.doc.lines == 2 and l == 2 and c1 == #tdv.doc.lines[2], 'Stale problem not clamped into the text')
+    local renamed = workspace .. '/renamed.ts'
+    tdv.doc:save(renamed, renamed)
+    wait(function() return lsp.client.diagnostics_for(renamed) and not lsp.client.diagnostics_for(ts) end, 'Save-as did not reopen under the new path')
+    local notes = workspace .. '/notes.txt'
+    tdv.doc:save(notes, notes)
+    assert(tdv.doc.lsp == nil and not lsp.client.diagnostics_for(renamed), 'Saving as a file without a server kept the server')
     for _, name in ipairs({'lsp:goto-definition', 'lsp:goto-definition-at-mouse', 'lsp:find-references', 'lsp:hover',
       'lsp:document-symbols', 'lsp:workspace-symbols', 'lsp:next-problem', 'lsp:previous-problem'}) do
       assert(command.map[name], name .. ' missing')

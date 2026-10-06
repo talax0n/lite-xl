@@ -64,7 +64,10 @@ end
 function RPC:flush()
   while #self.out > 0 do
     local data = self.out[1]
-    local n = self.proc:write(data)
+    -- A server that closed stdin makes write raise (and sends it SIGTERM);
+    -- drop the queue and let the read loop see the exit.
+    local ok, n = pcall(self.proc.write, self.proc, data)
+    if not ok then self.out = {}; return end
     if not n or n == 0 then return end
     if n < #data then self.out[1] = data:sub(n + 1); return end
     table.remove(self.out, 1)

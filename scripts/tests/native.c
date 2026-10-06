@@ -6,6 +6,7 @@
 #include <stdio.h>
 #ifndef _WIN32
 #include <unistd.h>
+#include <signal.h>
 #endif
 int luaopen_terminal(lua_State *L);
 int luaopen_process(lua_State *L);
@@ -22,6 +23,9 @@ static int absolute_path(lua_State *L) {
 }
 int main(int argc, char **argv) {
   if (argc != 2) return 2;
+#ifndef _WIN32
+  signal(SIGPIPE, SIG_IGN); // as in src/main.c: a dead child's pipe must fail the write, not kill us
+#endif
   lua_State *L = luaL_newstate(); luaL_openlibs(L);
   luaL_requiref(L, "terminal", luaopen_terminal, 1); lua_pop(L, 1);
   luaL_requiref(L, "process", luaopen_process, 1); lua_pop(L, 1);

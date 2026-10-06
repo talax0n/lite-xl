@@ -9,7 +9,6 @@ local keymap = require "core.keymap"
 local style = require "core.style"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
-local git = require "plugins.scm.git"
 local client = require "plugins.lsp.client"
 local servers = require "plugins.lsp.servers"
 local util = require "plugins.lsp.util"
@@ -33,9 +32,9 @@ function M.install(spec)
   installing[spec.name] = true; core.redraw = true
   core.add_thread(function()
     common.mkdirp(servers.dir)
-    local out, err = git.exec(servers.dir, "/usr/bin/env", servers.install_argv(spec), nil, 900)
+    local ok, err = servers.install(spec)
     installing[spec.name] = nil
-    if not out then
+    if not ok then
       core.error("Installing the %s language server failed: %s", spec.label, (err or "unknown error"):sub(-400))
       return
     end
@@ -57,7 +56,10 @@ end
 local function attach(doc)
   local path = doc.abs_filename
   local spec = path and servers.find(path)
-  if not spec then return end
+  if not spec then
+    if doc.lsp then client.close(doc.lsp, doc); doc.lsp = nil end
+    return
+  end
   local c = client.get(spec, util.find_root(path, spec.roots, M.project_root(path)))
   if doc.lsp and doc.lsp ~= c then client.close(doc.lsp, doc) end
   doc.lsp = c
@@ -107,7 +109,7 @@ function M.line_diagnostics(doc, line)
   local cached = index[doc]
   if not cached or cached.gen ~= client.generation or cached.path ~= doc.abs_filename then
     cached = {gen = client.generation, path = doc.abs_filename, lines = {}}
-    for _, d in ipairs(doc.abs_filename and client.diagnostics[doc.abs_filename] or {}) do
+    for _, d in ipairs(doc.abs_filename and client.diagnostics_for(doc.abs_filename) or {}) do
       for l = d.line1, math.min(d.line2, d.line1 + 200) do
         cached.lines[l] = cached.lines[l] or {}
         table.insert(cached.lines[l], d)
@@ -248,7 +250,11 @@ end
 
 -- Opens a location; `col` is a byte column, `character` an LSP UTF-16 one.
 function M.jump(t)
-  local ok, doc = pcall(core.open_doc, t.path)
+  local path = util.canonical(t.path)
+  local doc
+  for _, d in ipairs(core.docs) do if d.abs_filename and util.canonical(d.abs_filename) == path then doc = d end end
+  local ok = true
+  if not doc then ok, doc = pcall(core.open_doc, t.path) end
   if not ok then core.error("Cannot open %s", t.path); return end
   local dv = core.root_view:open_doc(doc)
   local line = common.clamp(t.line, 1, #doc.lines)
@@ -288,7 +294,7 @@ local counts_item = core.status_view:add_item({
 })
 counts_item.on_draw = function(x, y, h, hovered, calc_only)
   local errors, warnings = 0, 0
-  for _, d in ipairs(client.diagnostics[active_doc().abs_filename] or {}) do
+  for _, d in ipairs(client.diagnostics_for(active_doc().abs_filename) or {}) do
     if d.severity == 1 then errors = errors + 1 elseif d.severity == 2 then warnings = warnings + 1 end
   end
   local s, gap = math.floor(8 * SCALE), style.padding.x / 2
@@ -441,7 +447,7 @@ function M.workspace_symbols()
 end
 
 function M.next_problem(dv, dir)
-  local list = client.diagnostics[dv.doc.abs_filename] or {}
+  local list = client.diagnostics_for(dv.doc.abs_filename) or {}
   if #list == 0 then return end
   local line, col = dv.doc:get_selection()
   local found
@@ -455,9 +461,10 @@ function M.next_problem(dv, dir)
     end
     found = found or list[#list]
   end
-  dv.doc:set_selection(found.line1, found.col1)
-  dv:scroll_to_line(found.line1, true, true)
-  local x, y = dv:get_line_screen_position(found.line1, found.col1)
+  local fl, fc = util.clamp(dv.doc.lines, found.line1, found.col1)
+  dv.doc:set_selection(fl, fc)
+  dv:scroll_to_line(fl, true, true)
+  local x, y = dv:get_line_screen_position(fl, fc)
   M.set_hover({view = dv, x = x, y = y, t = 0, asked = true, text = util.describe(found)})
 end
 

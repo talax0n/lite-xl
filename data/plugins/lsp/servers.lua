@@ -1,5 +1,6 @@
 -- Language servers TreX knows: which files they handle, how to start and
 -- install them, and which files mark their project root.
+local process = require "core.process"
 local M = {}
 local HOME = os.getenv("HOME") or ""
 M.dir = HOME .. "/.local/share/trex/lsp"
@@ -60,6 +61,28 @@ function M.install_argv(spec)
   elseif r.go then add({"GOBIN=" .. M.dir .. "/bin", "go", "install", r.go})
   else add(r.cmd) end
   return argv
+end
+
+-- Runs in a thread on its own process, not git.exec: that one's two slots are
+-- shared with source control and an npm install can hold one for minutes.
+-- Returns true, or nil and the tail of the output.
+function M.install(spec, timeout)
+  local ok, proc = pcall(process.start, {"/usr/bin/env", table.unpack(M.install_argv(spec))}, {cwd = M.dir})
+  if not ok or not proc or not proc.process then return nil, tostring(proc) end
+  proc:close_stream(process.STREAM_STDIN)
+  local out, started = "", system.get_time()
+  while true do
+    local busy = false
+    for _, stream in ipairs({process.STREAM_STDOUT, process.STREAM_STDERR}) do
+      local data = proc:read(stream, 65536)
+      if data and #data > 0 then busy, out = true, (out .. data):sub(-4000) end
+    end
+    if not busy and not proc:running() then break end
+    if system.get_time() - started > (timeout or 900) then proc:kill(); return nil, out .. "\ntimed out" end
+    coroutine.yield(busy and 0 or 0.05)
+  end
+  if proc:returncode() ~= 0 then return nil, out ~= "" and out or "exit code " .. tostring(proc:returncode()) end
+  return true
 end
 
 function M.install_text(spec)

@@ -11,6 +11,9 @@ function M.uri_to_path(uri)
   return (path:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
 end
 
+-- Symlinks resolved (/tmp -> /private/tmp), so server and editor paths meet.
+function M.canonical(path) return system.absolute_path(path) or path end
+
 local function char_len(byte) return byte < 0x80 and 1 or byte < 0xE0 and 2 or byte < 0xF0 and 3 or 4 end
 
 -- LSP columns are 0-based UTF-16 code units; lite-xl columns are 1-based bytes.
@@ -66,6 +69,13 @@ function M.diagnostics(list, lines)
     return a.severity < b.severity
   end)
   return out
+end
+
+-- Positions are converted at publish time and go stale as the text changes;
+-- clamp them into the current lines before using them as a location.
+function M.clamp(lines, line, col)
+  line = math.max(1, math.min(line, #lines))
+  return line, math.max(1, math.min(col, #lines[line]))
 end
 
 function M.describe(d)

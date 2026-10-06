@@ -334,9 +334,49 @@ do
   old:kill()
   wait(function() return c.state == 'ready' and c.rpc ~= old and client.diagnostics[doc.abs_filename] end, 'Not restarted after crash')
   check(#c.crashes == 1, 'Crash restart reopens documents')
-  client.close(c, doc); client.stop(c)
+  local gen = client.generation
+  client.close(c, doc)
+  check(client.diagnostics[doc.abs_filename] == nil and client.generation > gen, 'Closing a document drops its diagnostics')
+  client.stop(c)
   wait(function() return c.rpc == nil end, 'Server not shut down')
   check(client.clients[c.key] == nil, 'Stopped client forgotten')
+  local rpc = require 'plugins.lsp.rpc'
+  local exits, failed = 0, nil
+  local dead = assert(rpc.start({'/bin/sh', '-c', 'exit 0'}, {stderr = function() end, notify = function() end,
+    request = function() end, exit = function() exits = exits + 1 end}))
+  dead:notify('big', {text = string.rep('x', 1 << 20)})
+  dead:request('never', nil, function(_, err) failed = err end)
+  wait(function() return exits > 0 and failed end, 'Dead server never reported')
+  check(exits == 1 and not dead.alive, 'Writing to an exited server ends the session once')
+  local real, link = tmp .. '/lsp-real', tmp .. '/lsp-link'
+  assert(os.execute("mkdir -p '" .. real .. "' && ln -s '" .. real .. "' '" .. link .. "'"))
+  io.open(real .. '/b.ts', 'w'):close()
+  local ldoc = {abs_filename = link .. '/b.ts', lines = {'const é = 42\n'}}
+  local lc = client.get(spec, link)
+  client.open(lc, ldoc)
+  wait(function() return client.diagnostics[real .. '/b.ts'] or client.diagnostics[ldoc.abs_filename] end, 'No diagnostics via symlink')
+  local ld = client.diagnostics[real .. '/b.ts']
+  check(ld and ld[1].col2 == 14 and client.diagnostics_for(ldoc.abs_filename) == ld, 'Symlinked paths share one diagnostics entry')
+  client.close(lc, ldoc)
+  check(client.diagnostics_for(ldoc.abs_filename) == nil, 'Closing a symlinked document drops its diagnostics')
+  client.stop(lc)
+  wait(function() return lc.rpc == nil end, 'Symlinked server not shut down')
+  local servers = require 'plugins.lsp.servers'
+  servers.dir = tmp .. '/lsp-install'
+  assert(os.execute("mkdir -p '" .. servers.dir .. "'"))
+  local busy = 0
+  for _ = 1, 2 do core.add_thread(function() busy = busy + 1; git.exec(tmp, 'sleep', {'3'}); busy = busy - 1 end) end
+  wait(function() return busy == 2 end, 'Source control slots not taken')
+  local ok_run, bad_run
+  local started = system.get_time()
+  core.add_thread(function()
+    ok_run = {servers.install({install = {cmd = {'sh', '-c', 'exit 0'}}})}
+    bad_run = {servers.install({install = {cmd = {'sh', '-c', 'echo no network >&2; exit 3'}}})}
+  end)
+  wait(function() return bad_run end, 'Install never finished')
+  check(ok_run[1] and system.get_time() - started < 2, 'Installs do not queue behind source control')
+  check(not bad_run[1] and bad_run[2]:find('no network', 1, true), 'Failed install reports its output')
+  wait(function() return busy == 0 end, 'Source control commands never finished')
 end
 assert(os.execute('rm -rf ' .. tmp))
 print(string.format('PASS: %d checks against real Git repositories and a native PTY', checks))

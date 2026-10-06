@@ -24,13 +24,15 @@ end
 
 local function lines_for(path)
   for _, c in pairs(M.clients) do
-    for doc in pairs(c.docs) do if doc.abs_filename == path then return doc.lines end end
+    for doc, entry in pairs(c.docs) do if entry.path == path then return doc.lines end end
   end
 end
 
+function M.diagnostics_for(path) return M.diagnostics[util.canonical(path)] end
+
 local function on_notify(c, method, params)
   if method == "textDocument/publishDiagnostics" then
-    local path = util.uri_to_path(params.uri)
+    local path = util.canonical(util.uri_to_path(params.uri))
     M.diagnostics[path] = util.diagnostics(params.diagnostics, lines_for(path))
     changed()
   elseif method == "window/showMessage" or method == "window/logMessage" then
@@ -106,8 +108,10 @@ function M.get(spec, root)
 end
 
 function M.open(c, doc)
-  if c.docs[doc] then return M.change(c, doc) end
-  c.docs[doc], c.idle_since = {version = 0, uri = util.path_to_uri(doc.abs_filename)}, nil
+  local entry = c.docs[doc]
+  if entry and entry.uri == util.path_to_uri(doc.abs_filename) then return M.change(c, doc) end
+  if entry then M.close(c, doc) end -- saved under a new name
+  c.docs[doc], c.idle_since = {version = 0, uri = util.path_to_uri(doc.abs_filename), path = util.canonical(doc.abs_filename)}, nil
   if c.state == "ready" then send_open(c, doc) end
 end
 
@@ -129,6 +133,7 @@ function M.close(c, doc)
   if not entry then return end
   if c.state == "ready" then c.rpc:notify("textDocument/didClose", {textDocument = {uri = entry.uri}}) end
   c.docs[doc] = nil
+  M.diagnostics[entry.path] = nil; changed()
   if next(c.docs) == nil then c.idle_since = system.get_time() end
 end
 

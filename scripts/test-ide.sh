@@ -10,6 +10,7 @@ case "$(uname -s)" in
     mkdir -p "$test_dir/share" "$test_dir/user"
     ln -s "$project_dir/data" "$test_dir/share/lite-xl"
     cp "$project_dir/scripts/tests/ui-runtime.lua" "$test_dir/user/ide_ui_test.lua"
+    TREX_SOURCE="$project_dir" TREX_RUNNER="$(cd "$build_dir" && pwd)/src/ide-test-runner" \
     SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software LITE_PREFIX="$test_dir" \
       LITE_USERDIR="$test_dir/user" LITE_XL_RUNTIME=ide_ui_test \
       "$build_dir/src/lite-xl" "$project_dir"

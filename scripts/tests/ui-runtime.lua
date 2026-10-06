@@ -210,6 +210,35 @@ function core.init(...)
       local got = syntax.get(workspace .. '/' .. file).name
       assert(got == name, file .. ' highlighted as ' .. tostring(got))
     end
+    -- Language servers, using the fake server for .ts files.
+    local lsp = require 'plugins.lsp'
+    local src = assert(os.getenv('TREX_SOURCE'), 'TREX_SOURCE not set')
+    table.insert(lsp.servers.list, 1, {name = 'fake', label = 'Fake', short = 'fake', files = {'%.ts$'}, id = 'typescript', roots = {},
+      cmd = {assert(os.getenv('TREX_RUNNER'), 'TREX_RUNNER not set'), src .. '/scripts/tests/fake-lsp.lua'}, env = {TREX_DATA = src .. '/data'}})
+    local ts = workspace .. '/app.ts'
+    write(ts, 'const answer = 42\n\nconst answer2 = answer\n')
+    local tdv = core.root_view:open_doc(core.open_doc(ts))
+    wait(function() return tdv.doc.lsp and tdv.doc.lsp.state == 'ready' and #lsp.line_diagnostics(tdv.doc, 1) == 1 end, 'Diagnostics not shown', 15)
+    local draw_rect, red = renderer.draw_rect, {}
+    renderer.draw_rect = function(x, y, w, h, color, ...) if color == style.error then red[h] = true end; return draw_rect(x, y, w, h, color, ...) end
+    core.redraw = true
+    local s = math.max(1, math.floor(SCALE))
+    wait(function() return red[s] and red[math.floor(6 * SCALE)] and red[math.floor(8 * SCALE)] end, 'Squiggle, gutter dot or error count not drawn')
+    renderer.draw_rect = draw_rect
+    assert(core.status_view:get_item('lsp:diagnostics').active and core.status_view:get_item('lsp:server').active, 'Status items hidden')
+    local version = tdv.doc.lsp.docs[tdv.doc].version
+    tdv.doc:insert(2, 1, '-- typed\n')
+    wait(function() return tdv.doc.lsp.docs[tdv.doc].version == version + 1 end, 'Edit not synced')
+    tdv.doc:remove(2, 1, 3, 1)
+    coroutine.yield(0.5)
+    command.perform('lsp:problems')
+    local pv = core.active_view
+    assert(pv.name == 'Problems' and #pv.rows == 2 and pv.rows[2].target.line == 1, 'Problems tab missing the diagnostic')
+    core.set_active_view(tdv)
+    local c = tdv.doc.lsp
+    local old = c.rpc
+    old:kill()
+    wait(function() return c.state == 'ready' and c.rpc ~= old and #lsp.line_diagnostics(tdv.doc, 1) == 1 end, 'Server not restarted after crash', 15)
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
     print('PASS: nested workspace repositories, activity bar, source control sections, backlog, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)

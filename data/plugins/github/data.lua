@@ -1,5 +1,5 @@
 -- GitHub activity: pure query building and parsing, no editor or network.
--- model = {login, days = {{date = "2026-01-01", count = 3}, ...} (year calendar, oldest first),
+-- model = {login, days = {{date = "2025-10-05", count = 3}, ...} (rolling last-year calendar, oldest first),
 --   windows = {{label = "Today", contributions, commits, kinds = {commits, prs, issues, reviews, private}}, ...}}
 -- The panel adds streak (M.streak) and fetched_at.
 local json = require "plugins.lsp.json"
@@ -27,11 +27,10 @@ local TOTALS = "totalCommitContributions totalPullRequestContributions totalIssu
 
 function M.query(windows)
   local aliases = {}
-  for i, w in ipairs(windows) do
-    local calendar = i == #windows and " contributionCalendar { weeks { contributionDays { date contributionCount } } }" or ""
-    aliases[i] = string.format('w%d: contributionsCollection(from: "%s") { %s%s }', i, w.from, TOTALS, calendar)
-  end
-  return "{ viewer { login " .. table.concat(aliases, " ") .. " } }"
+  for i, w in ipairs(windows) do aliases[i] = string.format('w%d: contributionsCollection(from: "%s") { %s }', i, w.from, TOTALS) end
+  -- No `from`: the calendar covers the last year like the profile graph, so streaks cross January 1st.
+  return "{ viewer { login " .. table.concat(aliases, " ")
+    .. " cal: contributionsCollection { contributionCalendar { weeks { contributionDays { date contributionCount } } } } } }"
 end
 
 function M.thousands(n) return (tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")) end
@@ -58,12 +57,11 @@ function M.parse(graphql_json)
       reviews = c.totalPullRequestReviewContributions or 0, private = c.restrictedContributionsCount or 0}
     model.windows[i] = {label = label, commits = kinds.commits, kinds = kinds,
       contributions = kinds.commits + kinds.prs + kinds.issues + kinds.reviews + kinds.private}
-    if c.contributionCalendar then
-      for _, week in ipairs(list(c.contributionCalendar.weeks)) do
-        for _, day in ipairs(list(week.contributionDays)) do
-          if day.date and day.contributionCount then model.days[#model.days + 1] = {date = day.date, count = day.contributionCount} end
-        end
-      end
+  end
+  local calendar = viewer.cal and viewer.cal.contributionCalendar
+  for _, week in ipairs(list(calendar and calendar.weeks)) do
+    for _, day in ipairs(list(week.contributionDays)) do
+      if day.date and day.contributionCount then model.days[#model.days + 1] = {date = day.date, count = day.contributionCount} end
     end
   end
   return model
@@ -76,17 +74,33 @@ local function upto(days, today)
   return last
 end
 
+local function stamp(date)
+  local y, m, d = date:match("(%d+)-(%d+)-(%d+)")
+  return os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12})
+end
+
+-- Whole days from `a` to `b`; rounding absorbs DST shifts.
+local function gap(a, b) return math.floor((stamp(b) - stamp(a)) / 86400 + 0.5) end
+
+-- First and last index of this year's days up to today; "this year" stats ignore the rest of the rolling calendar.
+local function this_year(days, today)
+  local first, jan1 = 1, today:sub(1, 4) .. "-01-01"
+  while days[first] and days[first].date < jan1 do first = first + 1 end
+  return first, upto(days, today)
+end
+
 function M.streak(days, today)
   local last = upto(days, today)
   local s, run = {current = 0, longest = 0}, 0
   for i = 1, last do
-    run = days[i].count > 0 and run + 1 or 0
+    run = days[i].count == 0 and 0 or (run > 0 and gap(days[i - 1].date, days[i].date) == 1) and run + 1 or 1
     if run > s.longest then s.longest, s.longest_from, s.longest_to = run, days[i - run + 1].date, days[i].date end
   end
   -- Today isn't over yet: a zero today keeps yesterday's streak alive.
   local i = (last > 0 and days[last].date == today and days[last].count == 0) and last - 1 or last
   local to = i
-  while i > 0 and days[i].count > 0 do s.current = s.current + 1; i = i - 1 end
+  if i > 0 and gap(days[i].date, today) > 1 then i = 0 end
+  while i > 0 and days[i].count > 0 and (i == to or gap(days[i].date, days[i + 1].date) == 1) do s.current = s.current + 1; i = i - 1 end
   if s.current > 0 then s.current_from, s.current_to = days[i + 1].date, days[to].date end
   return s
 end
@@ -98,18 +112,15 @@ function M.short_date(date)
 end
 
 -- 0 is Sunday, as in os.date's wday - 1.
-function M.weekday(date)
-  local y, m, d = date:match("(%d+)-(%d+)-(%d+)")
-  return os.date("*t", os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12})).wday - 1
-end
+function M.weekday(date) return os.date("*t", stamp(date)).wday - 1 end
 
--- `n` totals of 7-day buckets, the last one ending today; the calendar has no gaps, so buckets go by index.
+-- `n` totals of 7-day buckets, the last one ending today.
 function M.weekly(days, today, n)
-  local last, totals = upto(days, today), {}
-  for k = 1, n do
-    local to, sum = last - 7 * (n - k), 0
-    for i = math.max(1, to - 6), to do sum = sum + days[i].count end
-    totals[k] = sum
+  local totals = {}
+  for k = 1, n do totals[k] = 0 end
+  for i = 1, upto(days, today) do
+    local k = n - gap(days[i].date, today) // 7
+    if k >= 1 then totals[k] = totals[k] + days[i].count end
   end
   return totals
 end
@@ -117,7 +128,8 @@ end
 -- Monday first.
 function M.weekdays(days, today)
   local totals = {0, 0, 0, 0, 0, 0, 0}
-  for i = 1, upto(days, today) do
+  local first, last = this_year(days, today)
+  for i = first, last do
     local wd = (M.weekday(days[i].date) + 6) % 7 + 1
     totals[wd] = totals[wd] + days[i].count
   end
@@ -126,14 +138,16 @@ end
 
 function M.best_day(days, today)
   local best
-  for i = 1, upto(days, today) do if not best or days[i].count > best.count then best = days[i] end end
+  local first, last = this_year(days, today)
+  for i = first, last do if not best or days[i].count > best.count then best = days[i] end end
   return best
 end
 
 function M.average(days, today)
-  local last, sum = upto(days, today), 0
-  for i = 1, last do sum = sum + days[i].count end
-  return last > 0 and sum / last or 0
+  local first, last = this_year(days, today)
+  local sum = 0
+  for i = first, last do sum = sum + days[i].count end
+  return last >= first and sum / (last - first + 1) or 0
 end
 
 return M

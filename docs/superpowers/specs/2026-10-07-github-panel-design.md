@@ -48,7 +48,7 @@ model = {
      kinds = {commits = 0, prs = 0, issues = 0, reviews = 0, private = 85}},
     {label = "This week",  ...}, {label = "This month", ...}, {label = "This year", ...},
   },
-  days = {{date = "2026-01-01", count = 3}, ...},  -- year calendar, oldest first
+  days = {{date = "2025-10-05", count = 3}, ...},  -- rolling last-year calendar, oldest first
   streak = {current = 43, longest = 43,           -- ranges are ISO dates, nil when 0
     current_from = "2026-08-25", current_to = "2026-10-06", longest_from = ..., longest_to = ...},
   fetched_at = <os.time>, error = nil | "message",
@@ -63,16 +63,22 @@ model = {
   computed from local midnight: today, Monday of this week, the 1st of this
   month, Jan 1st of this year.
 - `query(windows)` → one GraphQL query string with aliased
-  `contributionsCollection(from:)` per window (to defaults to now), the
-  year `contributionCalendar` (on the This-year alias) and `viewer.login`.
+  `contributionsCollection(from:)` per window (to defaults to now), a `cal`
+  alias with no `from` whose `contributionCalendar` covers the last year
+  (about 53 weeks, starting on a Sunday, like the profile graph) and
+  `viewer.login`.
 - `parse(graphql_json)` → `model` (without `streak` and `fetched_at`).
 - `streak(days, today)` → `{current, longest, current_from, current_to,
   longest_from, longest_to}`. Current counts back from today; if today is 0
-  it counts back from yesterday (today isn't over).
+  it counts back from yesterday (today isn't over). Runs follow actual
+  dates: a missing date breaks them. Both streaks span the rolling year, so
+  they cross January 1st and the longest is the longest in the last year.
 - `weekly(days, today, n)` → `n` totals of 7-day buckets, the last ending
-  today, oldest first. `weekdays(days, today)` → 7 totals, Monday first.
-  `best_day(days, today)` → the first busiest day. `average(days, today)` →
-  contributions per calendar day up to today. `short_date("2026-08-25")` →
+  today (even if the calendar stops earlier), oldest first.
+  `weekdays(days, today)` → 7 totals, Monday first. `best_day(days, today)`
+  → the first busiest day. `average(days, today)` → contributions per
+  calendar day up to today. These three only count this year (Jan 1st to
+  today); the heatmap and weekly bars use the whole rolling calendar. `short_date("2026-08-25")` →
   `"Aug 25"`.
 - Uses `plugins.lsp.json` for decoding.
 
@@ -114,7 +120,8 @@ model = {
    - `windows` for a fixed `now` (a Wednesday mid-month) gives today's
      midnight, that Monday, the 1st, Jan 1st.
    - `streak`: run ending today; run ending yesterday with today 0; gap
-     resets current; longest picks the longest run; each with its dates.
+     resets current; longest picks the longest run; each with its dates;
+     current crosses Jan 1st; a missing date breaks a run.
    - `weekly`, `weekdays`, `best_day`, `average` on fixed day lists.
    - `parse` on a saved GraphQL fixture gives the expected window totals
      (restricted included), commit counts and kind breakdown, and no lists.

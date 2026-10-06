@@ -422,11 +422,27 @@ do
   local best = gh.best_day(days({1, 5, 2, 5, 9}), '2026-01-04')
   check(best.date == '2026-01-02' and best.count == 5, 'Best day is the first busiest day up to today')
   check(gh.average(days({1, 2, 3, 10}), '2026-01-03') == 2 and gh.average({}, '2026-01-03') == 0, 'Average per day up to today')
+  local function dated(list)
+    local result = {}
+    for i = 1, #list, 2 do result[#result + 1] = {date = list[i], count = list[i + 1]} end
+    return result
+  end
+  s = gh.streak(dated({'2025-12-29', 0, '2025-12-30', 1, '2025-12-31', 1, '2026-01-01', 0}), '2026-01-01')
+  check(s.current == 2 and s.current_from == '2025-12-30' and s.current_to == '2025-12-31', 'Current streak crosses January 1st')
+  s = gh.streak(dated({'2026-01-01', 1, '2026-01-03', 1}), '2026-01-03')
+  check(s.current == 1 and s.current_from == '2026-01-03' and s.longest == 1 and s.longest_to == '2026-01-01', 'A missing calendar date breaks the streak')
+  s = gh.streak(dated({'2026-01-01', 1, '2026-01-02', 1}), '2026-01-04')
+  check(s.current == 0 and s.current_from == nil and s.longest == 2, 'Missing days before today end the current streak')
+  check(table.concat(gh.weekly(days({1, 2, 3, 4, 5, 6, 7, 8}), '2026-01-10', 2), ',') == '6,30', 'Weekly buckets end today even when the calendar stops earlier')
+  local span = dated({'2025-12-31', 50, '2026-01-01', 1, '2026-01-02', 2, '2026-01-03', 3})
+  check(table.concat(gh.weekdays(span, '2026-01-03'), ',') == '0,0,0,1,2,3,0', 'Weekday totals only count this year')
+  check(gh.best_day(span, '2026-01-03').date == '2026-01-03' and gh.average(span, '2026-01-03') == 2, 'Best day and average only count this year')
+  check(gh.query(w):find('cal: contributionsCollection { contributionCalendar', 1, true) and not gh.query(w):find('w4: contributionsCollection(from: "' .. w[4].from .. '") { ' .. 'totalCommitContributions totalPullRequestContributions totalIssueContributions totalPullRequestReviewContributions restrictedContributionsCount contributionCalendar', 1, true), 'GitHub calendar covers the rolling last year')
   check(gh.short_date('2026-08-25') == 'Aug 25' and gh.short_date('2026-01-01') == 'Jan 1', 'GitHub short dates')
   local function window(c, r) return string.format('{"totalCommitContributions":%d,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":%d}', c, r) end
   local graphql = '{"data":{"viewer":{"login":"me","w1":' .. window(0, 85) .. ',"w2":' .. window(2, 100) .. ',"w3":' .. window(3, 200)
-    .. ',"w4":{"totalCommitContributions":4,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":300,'
-    .. '"contributionCalendar":{"weeks":[{"contributionDays":[{"date":"2026-01-01","contributionCount":3},{"date":"2026-01-02","contributionCount":0}]},{"contributionDays":[{"date":"2026-01-03","contributionCount":5}]}]}}}}}'
+    .. ',"w4":{"totalCommitContributions":4,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":300},'
+    .. '"cal":{"contributionCalendar":{"weeks":[{"contributionDays":[{"date":"2026-01-01","contributionCount":3},{"date":"2026-01-02","contributionCount":0}]},{"contributionDays":[{"date":"2026-01-03","contributionCount":5}]}]}}}}}'
   local model = assert(gh.parse(graphql))
   check(model.login == 'me' and model.windows[1].label == 'Today' and model.windows[1].contributions == 88 and model.windows[1].commits == 0, 'GitHub contributions include restricted ones')
   check(model.windows[4].contributions == 307 and model.windows[4].commits == 4, 'GitHub year totals and commit counts')
@@ -435,7 +451,7 @@ do
   check(k.commits == 4 and k.prs == 1 and k.issues == 1 and k.reviews == 1 and k.private == 300, 'GitHub keeps the contribution kinds')
   check(model.prs == nil and model.reviews == nil and model.pushes == nil and not gh.query(w):find('pullRequests', 1, true), 'GitHub no longer fetches PR, review or push lists')
   check(not gh.parse('{"errors":[{"message":"Bad credentials"}]}'), 'GitHub API errors fail the parse')
-  local holes = '{"data":{"viewer":{"login":"me","w4":{"contributionCalendar":{"weeks":[null,{"contributionDays":[null,{"date":"2026-01-01"},{"date":"2026-01-02","contributionCount":2}]}]}}}}}'
+  local holes = '{"data":{"viewer":{"login":"me","cal":{"contributionCalendar":{"weeks":[null,{"contributionDays":[null,{"date":"2026-01-01"},{"date":"2026-01-02","contributionCount":2}]}]}}}}}'
   local ok_holes, holed = pcall(gh.parse, holes)
   check(ok_holes, 'GitHub parse tolerates missing fields: ' .. tostring(holed))
   check(ok_holes and holed and #holed.days == 1 and holed.days[1].count == 2, 'GitHub calendar skips null and incomplete days')

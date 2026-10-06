@@ -3,6 +3,8 @@ local style = require "core.style"
 local View = require "core.view"
 local common = require "core.common"
 local parse = require "plugins.scm.parse"
+local syntax = require "core.syntax"
+local tokenizer = require "core.tokenizer"
 local M = {}
 local function line_height() return style.code_font:get_height() + style.padding.y end
 -- Diff / commit viewer: parses git output into rows (commit card, file headers,
@@ -112,9 +114,31 @@ function Text:set_text(text)
     for k, row in ipairs(list) do table.insert(rows, at + k, row) end
     table.insert(rows, at + #list + 1, {kind = "gap"})
   end
+  self.parsed = rows
   self:layout()
 end
 function Text:count_hunks() self.current_hunk = (self.current_hunk or 0) + 1; return self.current_hunk end
+-- Syntax tokens for a diff line. A file's lines are tokenized together on
+-- first use, carrying tokenizer state line to line and restarting per hunk.
+-- ponytail: whole file at once (diffs cap at 20,000 lines); go per hunk if big files stutter.
+function Text:tokens(row)
+  local file = row.file
+  if not file or row.kind == "file" then return nil end
+  if file.tokenized == nil then
+    local syn = syntax.get(file.path)
+    file.tokenized = syn ~= syntax.plain_text_syntax and #syn.patterns > 0
+    local start
+    for i, r in ipairs(self.parsed) do if r == file.row then start = i; break end end
+    local state
+    for i = (start or #self.parsed) + 1, #self.parsed do
+      local r = self.parsed[i]
+      if r.kind == "file" then break end
+      if r.kind == "hunk" then state = nil
+      elseif file.tokenized and (r.kind == "add" or r.kind == "del" or r.kind == "ctx") then r.tokens, state = tokenizer.tokenize(syn, r.text, state) end
+    end
+  end
+  return row.tokens
+end
 function Text:get_name() return self.name end
 local function code_h() return style.code_font:get_height() + math.floor(5 * SCALE) end
 function Text:layout()
@@ -231,7 +255,10 @@ function Text:draw_row(row, x, y, w)
     local c = kind == "add" and style.good or kind == "del" and style.error
     if c then renderer.draw_rect(x, y, w, h, tint(c, 28)); renderer.draw_rect(x, y, g - px / 2, h, tint(c, 30)) end
     core.push_clip_rect(x + g - px / 2, y, w - g + px / 2, h)
-    common.draw_text(style.code_font, style.syntax.normal, row.text, nil, x + g - self.scroll.x, y, 0, h)
+    local toks, tx = self:tokens(row), x + g - self.scroll.x
+    if toks then
+      for i = 1, #toks, 2 do tx = common.draw_text(style.code_font, style.syntax[toks[i]] or style.syntax.normal, toks[i + 1], nil, tx, y, 0, h) end
+    else common.draw_text(style.code_font, style.syntax.normal, row.text, nil, tx, y, 0, h) end
     core.pop_clip_rect()
     if row.old then common.draw_text(style.code_font, style.dim, tostring(row.old), "right", x, y, cw, h) end
     if row.new then common.draw_text(style.code_font, style.dim, tostring(row.new), "right", x + cw, y, cw, h) end

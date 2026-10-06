@@ -111,6 +111,12 @@ function core.init(...)
     assert(#tv.files == 1 and tv.rows[#tv.rows].file == tv.files[1], 'Diff rows not linked to files')
     tv:set_text('')
     assert(#tv.files == 0 and #tv.rows == 0, 'Text view did not reset')
+    local function first_add(v) for _, r in ipairs(v.rows) do if r.kind == 'add' then return r end end end
+    local lua_diff = views.Text('t', 'diff --git a/f.lua b/f.lua\n@@ -1 +1 @@\n-old\n+local x = 1\n')
+    local toks = lua_diff:tokens(first_add(lua_diff))
+    assert(toks and toks[1] == 'keyword' and toks[2] == 'local', 'Diff line not highlighted')
+    local plain_diff = views.Text('t', 'diff --git a/f.zzz b/f.zzz\n@@ -1 +1 @@\n+local x = 1\n')
+    assert(plain_diff:tokens(first_add(plain_diff)) == nil, 'Plain file got syntax tokens')
     assert(views.prompt and views.confirm, 'Shared prompt helpers missing')
     -- Commit review: unpushed commits on the main checkout.
     local review = require 'plugins.scm.review'

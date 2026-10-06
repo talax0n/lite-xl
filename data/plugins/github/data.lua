@@ -65,20 +65,27 @@ function M.parse(graphql_json)
   return model
 end
 
--- `today` is a "YYYY-MM-DD" date in the calendar's own (UTC) days.
+-- `today` is a "YYYY-MM-DD" date in the calendar's own (UTC) days. Ranges are nil for a 0 streak.
 function M.streak(days, today)
   local last = 0
   for i, day in ipairs(days) do if day.date <= today then last = i end end
-  local longest, run = 0, 0
+  local s, run = {current = 0, longest = 0}, 0
   for i = 1, last do
     run = days[i].count > 0 and run + 1 or 0
-    longest = math.max(longest, run)
+    if run > s.longest then s.longest, s.longest_from, s.longest_to = run, days[i - run + 1].date, days[i].date end
   end
   -- Today isn't over yet: a zero today keeps yesterday's streak alive.
   local i = (last > 0 and days[last].date == today and days[last].count == 0) and last - 1 or last
-  local current = 0
-  while i > 0 and days[i].count > 0 do current = current + 1; i = i - 1 end
-  return {current = current, longest = longest}
+  local to = i
+  while i > 0 and days[i].count > 0 do s.current = s.current + 1; i = i - 1 end
+  if s.current > 0 then s.current_from, s.current_to = days[i + 1].date, days[to].date end
+  return s
+end
+
+local MONTHS = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+function M.short_date(date)
+  local m, d = date:match("%d+-(%d+)-(%d+)")
+  return MONTHS[tonumber(m)] .. " " .. tonumber(d)
 end
 
 return M

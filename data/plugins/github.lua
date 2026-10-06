@@ -72,8 +72,9 @@ function GitHub:update()
   GitHub.super.update(self)
 end
 
-local number_font, small_font
+local number_font, small_font, card_font, label_font, date_font
 local function tint(c, a) return {c[1], c[2], c[3], a} end
+local BLUE, PURPLE, TEAL, FLAME, BORDER = {91, 155, 245, 255}, {192, 132, 252, 255}, {45, 212, 191, 255}, {251, 146, 60, 255}, {228, 226, 226, 110}
 local GREENS = {{14, 68, 41, 255}, {0, 109, 50, 255}, {38, 166, 65, 255}, {57, 211, 83, 255}}
 
 -- Shade thresholds: quartiles of the non-zero days, as on the GitHub profile graph.
@@ -88,6 +89,71 @@ end
 local function weekday(date)
   local y, m, d = date:match("(%d+)-(%d+)-(%d+)")
   return os.date("*t", os.time({year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12})).wday - 1
+end
+
+-- ponytail: rounded corners and the ring are rows and dots of draw_rect, the renderer has no paths.
+local function rounded(x, y, w, h, r, color)
+  for j = 0, r - 1 do
+    local dx = math.floor(r - math.sqrt(r * r - (r - j - 0.5) ^ 2) + 0.5)
+    renderer.draw_rect(x + dx, y + j, w - dx * 2, 1, color)
+    renderer.draw_rect(x + dx, y + h - 1 - j, w - dx * 2, 1, color)
+  end
+  renderer.draw_rect(x, y + r, w, h - r * 2, color)
+end
+
+-- Circle outline with a gap of `gap` radians at the top, where the flame sits.
+local function ring(cx, cy, r, t, gap, color)
+  local n = math.ceil(math.pi * 4 * r / t)
+  for k = 0, n - 1 do
+    local a = math.pi * 2 * k / n
+    if a > gap / 2 and a < math.pi * 2 - gap / 2 then
+      renderer.draw_rect(math.floor(cx + r * math.sin(a) - t / 2), math.floor(cy - r * math.cos(a) - t / 2), t, t, color)
+    end
+  end
+end
+
+local function flame(cx, top, w, h, color)
+  for j = 0, h - 1 do
+    local fw = math.floor(w * math.sin(math.pi * ((j + 0.5) / h) ^ 1.6) + 0.5)
+    if fw > 0 then renderer.draw_rect(math.floor(cx - fw / 2), top + j, fw, 1, color) end
+  end
+end
+
+local function range(from, to) return from and data.short_date(from) .. " - " .. data.short_date(to) or "No streak" end
+
+function GitHub:draw_card(model, x, y, w)
+  card_font = card_font or style.font:copy(24 * SCALE)
+  label_font = label_font or style.font:copy(10 * SCALE)
+  date_font = date_font or style.font:copy(10 * SCALE)
+  local pad, py = style.padding.x, style.padding.y
+  local s = model.streak or {current = 0, longest = 0}
+  local r, t = math.floor(24 * SCALE), math.max(2, math.floor(2 * SCALE))
+  local cx, cw = x + pad, w - pad * 2
+  local col = cw / 3
+  local ring_y = y + py * 2 + r
+  local label_y = ring_y + r + t + py
+  local h = label_y + label_font:get_height() + date_font:get_height() + py * 2 - y
+  rounded(cx, y, cw, h, math.floor(5 * SCALE), BORDER)
+  rounded(cx + 1, y + 1, cw - 2, h - 2, math.floor(5 * SCALE) - 1, {
+    math.min(255, style.background2[1] + 10), math.min(255, style.background2[2] + 10), math.min(255, style.background2[3] + 10), 255})
+  for i = 1, 2 do renderer.draw_rect(math.floor(cx + col * i), y + py, 1, h - py * 2, BORDER) end
+  local columns = {
+    {number = model.windows[4] and model.windows[4].contributions or 0, label = "Total Contributions", dates = "Jan 1 - Present", color = BLUE},
+    {number = s.current, label = "Current Streak", dates = range(s.current_from, s.current_to), color = PURPLE},
+    {number = s.longest, label = "Longest Streak", dates = range(s.longest_from, s.longest_to), color = BLUE},
+  }
+  for i, c in ipairs(columns) do
+    local lx = cx + col * (i - 1)
+    if i == 2 then
+      local mid = math.floor(lx + col / 2)
+      ring(mid, ring_y, r, t, 0.9, PURPLE)
+      flame(mid, ring_y - r - math.floor(7 * SCALE), math.floor(9 * SCALE), math.floor(13 * SCALE), FLAME)
+    end
+    common.draw_text(card_font, c.color, data.thousands(c.number), "center", lx, ring_y - r, col, r * 2)
+    common.draw_text(label_font, c.color, views.fit(label_font, c.label, col - 4), "center", lx, label_y, col, label_font:get_height())
+    common.draw_text(date_font, TEAL, views.fit(date_font, c.dates, col - 4), "center", lx, label_y + label_font:get_height(), col, date_font:get_height())
+  end
+  return y + h + pad
 end
 
 function GitHub:draw_tiles(model, x, y, w)
@@ -122,10 +188,7 @@ function GitHub:draw_heatmap(model, x, y, w)
     local color = level == 0 and tint(style.dim, 48) or GREENS[level]
     renderer.draw_rect(x + style.padding.x + (slot // 7) * step, y + (slot % 7) * step, size, size, color)
   end
-  y = y + step * 7 + style.padding.y
-  local s = model.streak or {current = 0, longest = 0}
-  common.draw_text(style.font, style.dim, string.format("Streak %d days · longest %d", s.current, s.longest), nil, x + style.padding.x, y, 0, lh())
-  return y + lh()
+  return y + step * 7 + style.padding.y
 end
 
 function GitHub:draw()
@@ -153,6 +216,7 @@ function GitHub:draw()
     y = y + lh()
   end
   if model and status.state ~= "auth" then
+    y = self:draw_card(model, x, y, w)
     y = self:draw_tiles(model, x, y, w)
     y = self:draw_heatmap(model, x, y, w)
   end

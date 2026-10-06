@@ -410,10 +410,14 @@ do
   end
   local s = gh.streak(days({1, 1, 1, 0, 2, 2}), '2026-01-06')
   check(s.current == 2 and s.longest == 3, 'Streak ending today, longest picks the longest run')
+  check(s.current_from == '2026-01-05' and s.current_to == '2026-01-06' and s.longest_from == '2026-01-01' and s.longest_to == '2026-01-03', 'Streak ranges for a run ending today and the longest run')
   s = gh.streak(days({0, 1, 1, 1, 0}), '2026-01-05')
-  check(s.current == 3, 'Streak counts back from yesterday when today is 0')
+  check(s.current == 3 and s.current_from == '2026-01-02' and s.current_to == '2026-01-04', 'Streak counts back from yesterday when today is 0')
   s = gh.streak(days({1, 1, 0, 0, 0}), '2026-01-05')
-  check(s.current == 0 and s.longest == 2, 'Gap resets the current streak')
+  check(s.current == 0 and s.longest == 2 and s.current_from == nil and s.current_to == nil and s.longest_to == '2026-01-02', 'Gap resets the current streak')
+  s = gh.streak(days({0, 0}), '2026-01-02')
+  check(s.longest == 0 and s.longest_from == nil, 'No streak has no range')
+  check(gh.short_date('2026-08-25') == 'Aug 25' and gh.short_date('2026-01-01') == 'Jan 1', 'GitHub short dates')
   local function window(c, r) return string.format('{"totalCommitContributions":%d,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":%d}', c, r) end
   local graphql = '{"data":{"viewer":{"login":"me","w1":' .. window(0, 85) .. ',"w2":' .. window(2, 100) .. ',"w3":' .. window(3, 200)
     .. ',"w4":{"totalCommitContributions":4,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":300,'

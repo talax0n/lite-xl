@@ -444,11 +444,9 @@ do
     .. ',"w4":{"totalCommitContributions":4,"totalPullRequestContributions":1,"totalIssueContributions":1,"totalPullRequestReviewContributions":1,"restrictedContributionsCount":300},'
     .. '"cal":{"contributionCalendar":{"weeks":[{"contributionDays":[{"date":"2026-01-01","contributionCount":3},{"date":"2026-01-02","contributionCount":0}]},{"contributionDays":[{"date":"2026-01-03","contributionCount":5}]}]}}}}}'
   local model = assert(gh.parse(graphql))
-  check(model.login == 'me' and model.windows[1].label == 'Today' and model.windows[1].contributions == 88 and model.windows[1].commits == 0, 'GitHub contributions include restricted ones')
-  check(model.windows[4].contributions == 307 and model.windows[4].commits == 4, 'GitHub year totals and commit counts')
+  check(model.login == 'me' and model.windows[1].label == 'Today' and model.windows[1].contributions == 88, 'GitHub contributions include restricted ones')
+  check(model.windows[4].contributions == 307 and model.windows[4].commits == nil, 'GitHub year total is one number')
   check(#model.days == 3 and model.days[3].date == '2026-01-03' and model.days[3].count == 5, 'GitHub calendar flattened oldest first')
-  local k = model.windows[4].kinds
-  check(k.commits == 4 and k.prs == 1 and k.issues == 1 and k.reviews == 1 and k.private == 300, 'GitHub keeps the contribution kinds')
   check(model.prs == nil and model.reviews == nil and model.pushes == nil and not gh.query(w):find('pullRequests', 1, true), 'GitHub no longer fetches PR, review or push lists')
   check(not gh.parse('{"errors":[{"message":"Bad credentials"}]}'), 'GitHub API errors fail the parse')
   local holes = '{"data":{"viewer":{"login":"me","cal":{"contributionCalendar":{"weeks":[null,{"contributionDays":[null,{"date":"2026-01-01"},{"date":"2026-01-02","contributionCount":2}]}]}}}}}'

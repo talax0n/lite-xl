@@ -35,8 +35,9 @@ contributions. Therefore:
   `totalCommitContributions + totalPullRequestContributions +
   totalIssueContributions + totalPullRequestReviewContributions +
   restrictedContributionsCount` for that window.
-- Each tile has a second line "N commits" from `totalCommitContributions`.
-  Numbers use thousands separators ("6,183", "1,486 commits").
+- One number per window, labelled as commits ("Total Commits" on the card).
+  No commits/private split is shown: the user found it confusing. Numbers
+  use thousands separators ("6,183").
 
 ## Data shape
 
@@ -44,8 +45,7 @@ contributions. Therefore:
 model = {
   login = "talax0n",
   windows = {            -- in this order
-    {label = "Today", contributions = 85, commits = 0,
-     kinds = {commits = 0, prs = 0, issues = 0, reviews = 0, private = 85}},
+    {label = "Today", contributions = 85},
     {label = "This week",  ...}, {label = "This month", ...}, {label = "This year", ...},
   },
   days = {{date = "2025-10-05", count = 3}, ...},  -- rolling last-year calendar, oldest first
@@ -99,9 +99,8 @@ model = {
   card, 1px light border, three columns: year total in blue with "Jan 1 -
   Present", current streak in purple inside a ring with a flame in its top
   gap, longest streak in blue; date ranges in teal); 2×2 tiles (big
-  contributions number, label, "N commits"); heatmap (53 columns × 7 rows,
+  number, label); heatmap (53 columns × 7 rows,
   cell size fit to width, a dim empty cell and 4 GitHub greens by quartile);
-  CONTRIBUTION TYPES (one stacked bar for this year, legend with counts);
   WEEKLY ACTIVITY (26 vertical bars, max labelled); BY WEEKDAY (7 horizontal
   bars, busiest highlighted); a line "Best day N on Mon D · Avg N/day".
   The renderer only draws rectangles, so the rounded corners, ring and

@@ -1,6 +1,6 @@
 -- GitHub activity: pure query building and parsing, no editor or network.
 -- model = {login, days = {{date = "2025-10-05", count = 3}, ...} (rolling last-year calendar, oldest first),
---   windows = {{label = "Today", contributions, commits, kinds = {commits, prs, issues, reviews, private}}, ...}}
+--   windows = {{label = "Today", contributions}, ...}}
 -- The panel adds streak (M.streak) and fetched_at.
 local json = require "plugins.lsp.json"
 local M = {}
@@ -53,10 +53,9 @@ function M.parse(graphql_json)
   local model = {login = viewer.login, windows = {}, days = {}}
   for i, label in ipairs(LABELS) do
     local c = viewer["w" .. i] or {}
-    local kinds = {commits = c.totalCommitContributions or 0, prs = c.totalPullRequestContributions or 0, issues = c.totalIssueContributions or 0,
-      reviews = c.totalPullRequestReviewContributions or 0, private = c.restrictedContributionsCount or 0}
-    model.windows[i] = {label = label, commits = kinds.commits, kinds = kinds,
-      contributions = kinds.commits + kinds.prs + kinds.issues + kinds.reviews + kinds.private}
+    -- Private org work only shows up as restricted contributions, so the one number is everything.
+    model.windows[i] = {label = label, contributions = (c.totalCommitContributions or 0) + (c.totalPullRequestContributions or 0)
+      + (c.totalIssueContributions or 0) + (c.totalPullRequestReviewContributions or 0) + (c.restrictedContributionsCount or 0)}
   end
   local calendar = viewer.cal and viewer.cal.contributionCalendar
   for _, week in ipairs(list(calendar and calendar.weeks)) do

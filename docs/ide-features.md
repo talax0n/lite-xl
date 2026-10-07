@@ -81,16 +81,15 @@ settings are accessible through the integrated terminal or GitHub website.
 
 The chart icon in the activity bar (`github:toggle`) opens a panel on the right
 with your own GitHub activity. A streak card at the top shows this year's total
-contributions and your current and longest streaks with their date ranges.
+commits and your current and longest streaks with their date ranges.
 Below it are contribution counts for today, this week, this month and this
-year, a heatmap of the last year, a bar splitting this year's contributions into commits,
-pull requests, issues, reviews and private work, weekly totals for the last
+year, a heatmap of the last year, weekly totals for the last
 26 weeks, totals by weekday, and your best day and daily average.
 
 Data comes from the signed-in GitHub CLI (`gh api graphql`). The panel refreshes on first open, every 10 minutes while visible, and
-from its Refresh button. Counts are contributions, the same figure as the
-profile graph, so private organization work is included. Each tile also shows
-how many of those are publicly visible commits. The heatmap and streak use
+from its Refresh button. Each count is one number, the same figure as the
+profile graph: commits, pull requests, issues and reviews, private organization
+work included. The heatmap and streak use
 GitHub's calendar days, which follow your local time zone, over the last year like the profile
 graph, so streaks carry across January 1st and the longest streak is the
 longest in the last year. Weekday totals, best day and average count this

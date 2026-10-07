@@ -133,7 +133,7 @@ function GitHub:draw_card(model, x, y, w)
     math.min(255, style.background2[1] + 10), math.min(255, style.background2[2] + 10), math.min(255, style.background2[3] + 10), 255})
   for i = 1, 2 do renderer.draw_rect(math.floor(cx + col * i), y + py, 1, h - py * 2, BORDER) end
   local columns = {
-    {number = model.windows[4] and model.windows[4].contributions or 0, label = "Total Contributions", dates = "Jan 1 - Present", color = BLUE},
+    {number = model.windows[4] and model.windows[4].contributions or 0, label = "Total Commits", dates = "Jan 1 - Present", color = BLUE},
     {number = s.current, label = "Current Streak", dates = range(s.current_from, s.current_to), color = PURPLE},
     {number = s.longest, label = "Longest Streak", dates = range(s.longest_from, s.longest_to), color = BLUE},
   }
@@ -156,7 +156,7 @@ function GitHub:draw_tiles(model, x, y, w)
   small_font = small_font or style.font:copy(12 * SCALE)
   local pad = style.padding.x
   local tw = (w - pad * 3) / 2
-  local th = number_font:get_height() + style.font:get_height() * 2 + style.padding.y * 2
+  local th = number_font:get_height() + style.font:get_height() + style.padding.y * 2
   for i, win in ipairs(model.windows) do
     local tx, ty = x + pad + ((i - 1) % 2) * (tw + pad), y + ((i - 1) // 2) * (th + pad)
     renderer.draw_rect(tx, ty, tw, th, style.background)
@@ -164,7 +164,6 @@ function GitHub:draw_tiles(model, x, y, w)
     common.draw_text(number_font, style.text, data.thousands(win.contributions), nil, tx + pad, cy, 0, number_font:get_height())
     cy = cy + number_font:get_height()
     common.draw_text(style.font, style.accent, win.label, nil, tx + pad, cy, 0, style.font:get_height())
-    common.draw_text(small_font, style.dim, views.fit(small_font, data.thousands(win.commits) .. " commits", tw - pad * 2), nil, tx + pad, cy + style.font:get_height(), 0, style.font:get_height())
   end
   return y + (th + pad) * 2
 end
@@ -186,8 +185,6 @@ function GitHub:draw_heatmap(model, x, y, w)
   return y + step * 7 + style.padding.y
 end
 
-local KINDS = {{"commits", "Commits", GREENS[4]}, {"prs", "Pull requests", BLUE}, {"issues", "Issues", FLAME},
-  {"reviews", "Reviews", PURPLE}, {"private", "Private", {139, 148, 158, 255}}}
 local WEEKDAYS = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
 
 local function title(text, x, y)
@@ -206,29 +203,6 @@ function GitHub:draw_charts(model, x, y, w)
       best = data.best_day(model.days, today), average = data.average(model.days, today)}
   end
   local st = self.stats
-
-  local kinds, total = model.windows[4] and model.windows[4].kinds, 0
-  if kinds then
-    y = title("CONTRIBUTION TYPES", x, y)
-    for _, k in ipairs(KINDS) do total = total + kinds[k[1]] end
-    local bx, bh = x + pad, math.floor(10 * SCALE)
-    if total == 0 then renderer.draw_rect(bx, y, cw, bh, tint(style.dim, 48)) end
-    for _, k in ipairs(KINDS) do
-      local kw = total > 0 and math.floor(cw * kinds[k[1]] / total + 0.5) or 0
-      renderer.draw_rect(bx, y, math.min(kw, x + pad + cw - bx), bh, k[3])
-      bx = bx + kw
-    end
-    y = y + bh + py
-    local col = (cw - pad) / 2
-    for i, k in ipairs(KINDS) do
-      local lx, ly = x + pad + ((i - 1) % 2) * (col + pad), y + ((i - 1) // 2) * sh
-      local dot = math.floor(sh / 2)
-      renderer.draw_rect(lx, ly + (sh - dot) / 2, dot, dot, k[3])
-      common.draw_text(small_font, style.text, k[2], nil, lx + dot * 2, ly, 0, sh)
-      common.draw_text(small_font, style.dim, data.thousands(kinds[k[1]]), "right", lx, ly, col, sh)
-    end
-    y = y + math.ceil(#KINDS / 2) * sh + py
-  end
 
   y = title("WEEKLY ACTIVITY", x, y)
   local max = 0

@@ -51,6 +51,12 @@ function core.init(...)
     local has_scm = false
     for _, item in ipairs(tree.toolbar.toolbar_commands) do has_scm = has_scm or item.command == 'scm:toggle' end
     assert(has_scm and tree.toolbar.size.x > 0, 'Activity bar missing')
+    local w0, ex, ey = tree.target_size, tree.position.x + tree.size.x, tree.position.y + 50
+    core.root_view:on_mouse_pressed('left', ex, ey, 1)
+    core.root_view:on_mouse_moved(ex + 150, ey, 150, 0)
+    core.root_view:on_mouse_released('left', ex + 150, ey)
+    assert(tree.target_size >= w0 + 140, 'Explorer divider does not drag: ' .. w0 .. ' -> ' .. tree.target_size)
+    tree:set_target_size('x', w0)
     assert(core.compose_window_title('') == 'TreX', 'Window branding missing')
     assert(command.perform('scm:toggle'))
     assert(command.perform('terminal:new'))

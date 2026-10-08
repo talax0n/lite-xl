@@ -56,6 +56,8 @@ function ToolbarView:toggle_visible()
 end
 
 function ToolbarView:get_min_width() return self:get_width() end
+-- Fixed width; claiming the resize lets the divider drag pass the rest to the treeview.
+function ToolbarView:set_target_size(axis) return axis == "x" end
 
 function ToolbarView:each_item()
   local w = self.size.x

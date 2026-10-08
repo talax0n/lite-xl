@@ -541,7 +541,7 @@ local toolbar_view = nil
 local toolbar_plugin, ToolbarView = pcall(require, "plugins.toolbarview")
 if config.plugins.toolbarview ~= false and toolbar_plugin then
   toolbar_view = ToolbarView()
-  view.node:split("left", toolbar_view, {x = true})
+  view.node:split("left", toolbar_view, {x = true}, true)
   command.add(nil, {
     ["toolbar:toggle"] = function()
       toolbar_view:toggle_visible()

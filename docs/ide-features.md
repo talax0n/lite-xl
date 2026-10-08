@@ -101,7 +101,9 @@ change its width.
 
 The **Database** item in the activity bar toggles a right-side panel that lists
 connections, then schemas, tables and columns. Each level loads when you expand
-it. Click a table to open its first 100 rows in a results tab.
+it. Click a table to show its first 100 rows in the results pane under the
+tree. The pane stays in the right column, so the editor area is left alone.
+Drag its top edge to resize it, and click **×** to hide it.
 
 Click **+** (or run `database:add-connection`) to add a connection. You enter a
 name and then a URL:
@@ -116,7 +118,7 @@ If the project root's `.env` defines `DATABASE_URL`, the panel also shows that
 connection as read-only, named after the project folder plus ` (.env)`.
 
 `database:run-query` runs the selection, or the whole document, against the
-selected connection and shows the result in a results tab. In `.sql` files,
+selected connection and shows the result in the same pane. In `.sql` files,
 **Cmd+Return** runs it. TreX asks for confirmation before it runs a statement
 that does not start with `select`, `with`, `explain`, `show`, `pragma`,
 `values` or `table`. Table browsing is read-only. Statements time out after 30

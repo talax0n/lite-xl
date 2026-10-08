@@ -12,7 +12,7 @@ local git = require "plugins.scm.git"
 local views = require "plugins.scm.views"
 local data = require "plugins.database.data"
 
-config.plugins.database = common.merge({width = 320}, config.plugins.database)
+config.plugins.database = common.merge({width = 320, results_height = 360}, config.plugins.database)
 local options = config.plugins.database
 local CONF = USERDIR .. PATHSEP .. "databases.conf"
 
@@ -131,13 +131,28 @@ function M.refresh(node)
   for _, n in ipairs(M.nodes) do if n.conn.name == node.conn.name and n.expanded and n.state ~= "loading" then n.expanded = false; M.toggle(n) end end
 end
 
--- Results tab
+-- Results pane, docked under the tree; hidden until something is shown.
 local Results = View:extend()
 M.Results = Results
+local panel, results
 local function lh() return style.code_font:get_height() + style.padding.y end
-function Results:new(key, title) Results.super.new(self); self.scrollable = true; self.key, self.title, self.run = key, title, 0 end
-function Results:get_name() return self.title end
-function Results:get_scrollable_size() return lh() * (3 + #(self.rows or {})) end
+function Results:new() Results.super.new(self); self.scrollable = true; self.run = 0 end
+function Results:get_name() return self.title or "Results" end
+function Results:get_size() return 0, self.size.y end
+function Results:set_target_size(axis, height)
+  if axis == "y" then options.results_height = math.max(120, height / SCALE); core.redraw = true; return true end
+end
+function Results:update()
+  local height = panel and panel.visible and self.key and options.results_height * SCALE or 0
+  if self.size.y ~= height then self.size.y = height; core.redraw = true end
+  Results.super.update(self)
+end
+local function close_x(self) return self.position.x + self.size.x - style.padding.x - style.font:get_width("×") end
+function Results:on_mouse_pressed(button, x, y, clicks)
+  if y < self.position.y + lh() and x >= close_x(self) - style.padding.x then self.key, self.title = nil, nil; core.redraw = true; return true end
+  return Results.super.on_mouse_pressed(self, button, x, y, clicks)
+end
+function Results:get_scrollable_size() return lh() * (4 + #(self.rows or {})) end
 function Results:get_h_scrollable_size() return (self.total_w or 0) + style.padding.x * 2 end
 function Results:on_mouse_wheel(y, x)
   if keymap.modkeys["shift"] then x, y = y, 0 end
@@ -180,8 +195,13 @@ function Results:draw_cells(cells, y, color)
 end
 
 function Results:draw()
+  if not self.key then return end
   self:draw_background(style.background)
   local x, y, h, pad = self.position.x, self.position.y, lh(), style.padding.x
+  renderer.draw_rect(x, y, self.size.x, h, style.background2)
+  common.draw_text(style.font, style.text, views.fit(style.font, self.title or "", close_x(self) - x - pad * 2), nil, x + pad, y, 0, h)
+  common.draw_text(style.font, style.dim, "×", nil, close_x(self), y, 0, h)
+  y = y + h
   if self.loading or self.error then
     local lines = self.loading and {"Running…"} or {}
     for line in tostring(self.error or ""):gmatch("[^\r\n]+") do lines[#lines + 1] = line end
@@ -191,7 +211,7 @@ function Results:draw()
   common.draw_text(style.font, style.dim, self.note or "", nil, x + pad, y, 0, h)
   if #self.columns == 0 then return end
   local top = y + h
-  core.push_clip_rect(x, top, self.size.x, self.size.y - h)
+  core.push_clip_rect(x, top, self.size.x, self.size.y - h * 2)
   local first = math.max(1, math.floor(self.scroll.y / h) + 1)
   for r = first, math.min(#self.cells, first + math.ceil(self.size.y / h)) do
     local ry = top + h * r - self.scroll.y
@@ -205,15 +225,10 @@ function Results:draw()
 end
 
 local function open_results(key, title)
-  for _, view in ipairs(core.root_view.root_node:get_children()) do
-    if view:is(Results) and view.key == key then
-      core.root_view.root_node:get_node_for_view(view):set_active_view(view)
-      return view
-    end
-  end
-  local view = Results(key, title)
-  core.root_view:get_active_node_default():add_view(view)
-  return view
+  if not panel then command.perform("database:toggle") end
+  if not panel.visible then command.perform("database:toggle") end
+  results.key, results.title = key, title
+  return results
 end
 
 function M.show(conn, sql, key, title, readonly, limited)
@@ -235,7 +250,6 @@ end
 
 -- Panel
 local Database = View:extend()
-local panel
 function Database:new() Database.super.new(self); self.visible = true; self.scrollable = true; self.rows = {} end
 function Database:get_name() return "Database" end
 function Database:get_size() return self.visible and options.width * SCALE or 0, 0 end
@@ -379,7 +393,8 @@ command.add(nil, {
   ["database:toggle"] = function()
     if not panel then
       panel = Database(); panel.size.x = options.width * SCALE
-      core.root_view:get_primary_node():split("right", panel, {x = true}, true)
+      local node = core.root_view:get_primary_node():split("right", panel, {x = true}, true)
+      results = Results(); node:split("down", results, {y = true}, true)
     else
       panel.visible = not panel.visible
       if not panel.visible and core.active_view == panel then core.set_active_view(core.root_view:get_primary_node().active_view) end
@@ -398,4 +413,5 @@ keymap.add({[PLATFORM == "Mac OS X" and "cmd+return" or "ctrl+return"] = functio
 end})
 
 function M.panel() return panel end
+function M.results() return results end
 return M

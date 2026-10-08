@@ -188,7 +188,8 @@ function core.init(...)
       dp:on_mouse_pressed('left', dp.position.x + 30, dp.position.y + math.floor(dbh * 1.5) + (i - 1) * dbh + 2 - dp.scroll.y, 1)
     end end
     local results
-    until_ok(function() results = core.active_view; return results:is(database.Results) and not results.loading and results.cells end, 'Preview tab did not open')
+    until_ok(function() results = database.results(); return results.key and not results.loading and results.cells end, 'Preview did not open')
+    assert(results.position.x >= dp.position.x and results.position.y > dp.position.y and results.size.y > 0 and not core.root_view:get_primary_node():get_node_for_view(results), 'Results not docked under the database tree')
     assert(table.concat(results.columns, ',') == 'id,note' and results.rows[1][1] == '1' and results.rows[1][2] == 'a, b', 'Preview cells wrong')
     assert(results.note == '1 row · first 100 rows', 'Preview note: ' .. tostring(results.note))
     results:draw()
@@ -197,7 +198,7 @@ function core.init(...)
     fp = assert(io.open(sql_path, 'wb')); fp:write('-- count\nselect count(*) as n from "my ""odd\' table"\n'); fp:close()
     core.root_view:open_doc(core.open_doc(sql_path))
     assert(command.perform('database:run-query'))
-    until_ok(function() results = core.active_view; return results:is(database.Results) and not results.loading and results.cells end, 'Query tab did not open')
+    until_ok(function() results = database.results(); return results.title and results.title:find('Query', 1, true) and not results.loading and results.cells end, 'Query results did not open')
     assert(results.columns[1] == 'n' and results.rows[1][1] == '1' and results.note == '1 row', 'Query result wrong: ' .. tostring(results.error))
     assert(database.save_connection('broken', 'mysql://x/y'))
     for _, n in ipairs(database.nodes) do if n.conn.name == 'broken' then assert(n.state == 'error' and n.error:find('Unsupported', 1, true), 'Bad URL not flagged') end end

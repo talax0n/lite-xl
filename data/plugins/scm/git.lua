@@ -16,12 +16,15 @@ function M.executable(name)
   return name
 end
 
-local function execute(cwd, executable, args, input, timeout)
+local function execute(cwd, executable, args, input, timeout, extra_env)
   local argv = {M.executable(executable)}; for _, value in ipairs(args) do argv[#argv + 1] = value end
-  local ok, proc = pcall(process.start, argv, {cwd = cwd, env = {
+  -- process.start merges this over the inherited environment, so PATH survives.
+  local env = {
     GIT_OPTIONAL_LOCKS = "0", GIT_TERMINAL_PROMPT = "0", GIT_PAGER = "cat", GH_PAGER = "cat", GH_PROMPT_DISABLED = "1",
     LC_ALL = "C", GIT_LITERAL_PATHSPECS = "1",
-  }})
+  }
+  for k, v in pairs(extra_env or {}) do env[k] = v end
+  local ok, proc = pcall(process.start, argv, {cwd = cwd, env = env})
   if not ok then return nil, tostring(proc) end
   if not proc or not proc.process then return nil, "Could not start " .. executable end
   local stdout, stderr, size, written, started = {}, {}, 0, 0, system.get_time()
@@ -52,11 +55,11 @@ local function execute(cwd, executable, args, input, timeout)
   return result, errors
 end
 local running = 0
-function M.exec(cwd, executable, args, input, timeout)
+function M.exec(cwd, executable, args, input, timeout, env)
   while running >= 2 do coroutine.yield(0.05) end
   running = running + 1
   core.background_tasks = (core.background_tasks or 0) + 1
-  local ok, result, err = pcall(execute, cwd, executable, args, input, timeout)
+  local ok, result, err = pcall(execute, cwd, executable, args, input, timeout, env)
   running = running - 1
   core.background_tasks = core.background_tasks - 1
   if not ok then return nil, tostring(result) end

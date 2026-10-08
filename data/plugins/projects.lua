@@ -16,6 +16,9 @@ if config.plugins.treeview == false then return end
 local tree = require "plugins.treeview"
 local REFOCUS_SECONDS = 30
 
+-- core:restart empties core.projects in core.exit and still draws a frame before reloading.
+local function current() local project = core.root_project(); return project and project.path end
+
 local Projects = View:extend()
 function Projects:__tostring() return "ProjectsView" end
 function Projects:new() Projects.super.new(self); self.scrollable = true; self.shown = true; self.rows = {} end
@@ -46,7 +49,7 @@ end
 function Projects:update()
   local visible = self.shown and tree.visible
   self:move_towards(self.size, "x", visible and options.width * SCALE or 0, nil, "treeview")
-  if visible then
+  if visible and current() then
     local focus = system.window_has_focus(core.window)
     if not self.loaded or (focus and not self.focused and system.get_time() - self.loaded > REFOCUS_SECONDS) then self:refresh() end
     self.focused = focus
@@ -60,7 +63,7 @@ local function refresh_rect(self)
 end
 
 function Projects:draw()
-  if self.size.x < 1 then return end
+  if self.size.x < 1 or not current() then return end
   self:draw_background(style.background2)
   local x, y, w, h, px = self.position.x, self.position.y, self.size.x, lh(), style.padding.x
   core.push_clip_rect(x, y, w, self.size.y)
@@ -70,7 +73,7 @@ function Projects:draw()
   common.draw_text(style.font, hot and style.accent or style.dim, "Refresh", "center", bx, by, bw, bh)
   local top = y + header_h()
   core.push_clip_rect(x, top, w, self.size.y - header_h())
-  local current = core.root_project().path
+  local current = current()
   for i, row in ipairs(self.rows) do
     local ry = top + (i - 1) * h - self.scroll.y
     if row.path == current then
@@ -120,7 +123,7 @@ function Projects:on_mouse_pressed(button, x, y, clicks)
   local bx, by, bw, bh = refresh_rect(self)
   if x >= bx and x < bx + bw and y >= by and y < by + bh then self:refresh(); return true end
   local row = self:row_at(x, y)
-  if row and row.path ~= core.root_project().path then
+  if row and current() and row.path ~= current() then
     core.confirm_close_docs(core.docs, function(dir) core.open_project(dir) end, row.path)
   end
   return true

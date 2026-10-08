@@ -94,6 +94,11 @@ function core.init(...)
     assert(config.plugins.projects.width * SCALE >= pw * SCALE + 50, 'Projects divider does not drag: ' .. pw .. ' -> ' .. config.plugins.projects.width)
     assert(toolbar.size.x == toolbar:get_width(), 'Activity bar width changed')
     config.plugins.projects.width = pw
+    local saved_projects = core.projects
+    core.projects = {}
+    local survived, crash = pcall(function() projects:update(); projects:draw() end)
+    core.projects = saved_projects
+    assert(survived, 'Projects column crashed while core:restart has no project: ' .. tostring(crash))
     -- The dummy window is narrow; the right-docked panels below need the room.
     assert(command.perform('projects:toggle'))
     deadline = system.get_time() + 3

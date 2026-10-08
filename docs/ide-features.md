@@ -125,6 +125,27 @@ that does not start with `select`, `with`, `explain`, `show`, `pragma`,
 seconds, and the Postgres password goes to `psql` through `PGPASSWORD`, never
 on the command line.
 
+## Projects
+
+The **PROJECTS** column sits between the activity bar and the file tree. It
+lists the folders next to the current project: every direct subfolder of the
+current project's parent folder, sorted by name. Hidden folders and
+`node_modules` are skipped. The current project is highlighted.
+
+A Git project shows its number of uncommitted files (`git status --porcelain`)
+in a small badge. Counts load when the column first shows, when you click
+**Refresh**, and when the window regains focus (at most every 30 seconds).
+
+Click another project to switch to it in this window. TreX asks about unsaved
+files first, and each project reopens its own tabs. Hover a row to see its full
+path. Drag the column's right edge to resize it.
+
+The column shows and hides with the file tree. `projects:toggle` hides just the
+column for the session. Settings:
+
+- `config.plugins.projects.root`: the folder to list (default: the current project's parent)
+- `config.plugins.projects.width`: column width (default `180`)
+
 ## Autosave
 
 TreX saves a file one second after you stop typing in it. Untitled buffers are

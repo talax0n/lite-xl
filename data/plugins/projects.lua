@@ -6,6 +6,8 @@ local command = require "core.command"
 local config = require "core.config"
 local style = require "core.style"
 local View = require "core.view"
+local keymap = require "core.keymap"
+local storage = require "core.storage"
 local git = require "plugins.scm.git"
 local data = require "plugins.projects.data"
 
@@ -21,7 +23,7 @@ local function current() local project = core.root_project(); return project and
 
 local Projects = View:extend()
 function Projects:__tostring() return "ProjectsView" end
-function Projects:new() Projects.super.new(self); self.scrollable = true; self.shown = true; self.rows = {} end
+function Projects:new() Projects.super.new(self); self.scrollable = true; self.shown = storage.load("projects", "shown") ~= false; self.rows = {} end
 local function lh() return style.font:get_height() + style.padding.y end
 local function header_h() return math.floor(lh() * 1.5) end
 function Projects:get_scrollable_size() return header_h() + #self.rows * lh() end
@@ -134,8 +136,14 @@ local view = Projects()
 core.root_view.root_node:get_node_for_view(tree):split("left", view, {x = true}, true)
 
 command.add(nil, {
-  ["projects:toggle"] = function() view.shown = not view.shown end,
+  ["projects:toggle"] = function()
+    if tree.visible then view.shown = not view.shown else tree.visible, view.shown = true, true end
+    -- Persisted because switching projects restarts TreX.
+    storage.save("projects", "shown", view.shown)
+  end,
   ["projects:refresh"] = function() view:refresh() end,
 })
+
+keymap.add({[PLATFORM == "Mac OS X" and "cmd+alt+b" or "ctrl+alt+b"] = "projects:toggle"})
 
 return view

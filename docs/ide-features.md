@@ -140,8 +140,10 @@ Click another project to switch to it in this window. TreX asks about unsaved
 files first, and each project reopens its own tabs. Hover a row to see its full
 path. Drag the column's right edge to resize it.
 
-The column shows and hides with the file tree. `projects:toggle` hides just the
-column for the session. Settings:
+The column shows and hides with the file tree. The **Projects** folder icon in
+the activity bar, **Cmd+Alt+B** (Ctrl+Alt+B elsewhere) or `projects:toggle`
+hides or shows just the column, and TreX remembers the choice across restarts
+and project switches. If the tree is hidden, the toggle shows both. Settings:
 
 - `config.plugins.projects.root`: the folder to list (default: the current project's parent)
 - `config.plugins.projects.width`: column width (default `180`)

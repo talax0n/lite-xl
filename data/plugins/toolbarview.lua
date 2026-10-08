@@ -37,6 +37,8 @@ function ToolbarView:new()
     {symbol = "f", command = "treeview:toggle", name = "Explorer",
       active = function() local t = tree(); return t and t.visible and not scm_visible() end,
       perform = function() if scm_visible() then command.perform("scm:toggle") else command.perform("treeview:toggle") end end},
+    {symbol = "D", command = "projects:toggle", name = "Projects",
+      active = function() local p = package.loaded["plugins.projects"]; local t = tree(); return p and p.shown and t and t.visible end},
     {symbol = "L", command = "project-search:find", name = "Search"},
     {command = "scm:toggle", name = "Source Control", git = true, active = scm_visible,
       badge = function() local s = scm(); return s and s.change_count() or 0 end},

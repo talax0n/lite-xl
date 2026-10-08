@@ -104,6 +104,11 @@ function core.init(...)
     deadline = system.get_time() + 3
     repeat coroutine.yield(0.05) until projects.size.x == 0 or system.get_time() > deadline
     assert(projects.size.x == 0 and tree.size.x > 0, 'projects:toggle did not hide only the column')
+    assert(require('core.storage').load('projects', 'shown') == false, 'Projects toggle not remembered')
+    local has_projects_item = false
+    for _, item in ipairs(tree.toolbar.toolbar_commands) do has_projects_item = has_projects_item or item.command == 'projects:toggle' end
+    assert(has_projects_item, 'Projects missing from the activity bar')
+    assert(keymap.get_binding('projects:toggle'), 'Projects toggle has no shortcut')
     assert(core.compose_window_title('') == 'TreX', 'Window branding missing')
     assert(command.perform('scm:toggle'))
     assert(command.perform('terminal:new'))

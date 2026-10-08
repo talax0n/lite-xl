@@ -97,6 +97,32 @@ year only. If `gh` is missing or signed out, the
 panel asks you to run `gh auth login`. Set `config.plugins.github.width` to
 change its width.
 
+## Database
+
+The **Database** item in the activity bar toggles a right-side panel that lists
+connections, then schemas, tables and columns. Each level loads when you expand
+it. Click a table to open its first 100 rows in a results tab.
+
+Click **+** (or run `database:add-connection`) to add a connection. You enter a
+name and then a URL:
+
+- `postgres://user:pass@host:port/db?params` (or `postgresql://`), run through `psql`
+- `sqlite:///abs/path.db`, or `sqlite:relative.db` relative to the project root, run through `sqlite3`
+
+Connections are saved as `name = url` lines in `databases.conf` in the user
+directory. The file has mode 600, and passwords are stored in plain text. To
+edit, delete or refresh a connection, right-click it or click its **…** button.
+If the project root's `.env` defines `DATABASE_URL`, the panel also shows that
+connection as read-only, named after the project folder plus ` (.env)`.
+
+`database:run-query` runs the selection, or the whole document, against the
+selected connection and shows the result in a results tab. In `.sql` files,
+**Cmd+Return** runs it. TreX asks for confirmation before it runs a statement
+that does not start with `select`, `with`, `explain`, `show`, `pragma`,
+`values` or `table`. Table browsing is read-only. Statements time out after 30
+seconds, and the Postgres password goes to `psql` through `PGPASSWORD`, never
+on the command line.
+
 ## Terminal
 
 Press **Ctrl+`** to toggle the terminal, or **Ctrl+Shift+`** for a new session.

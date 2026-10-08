@@ -89,8 +89,9 @@ year, a heatmap of the last year, weekly totals for the last
 Data comes from the signed-in GitHub CLI (`gh api graphql`). The panel refreshes on first open, every 10 minutes while visible, and
 from its Refresh button. Each count is one number, the same figure as the
 profile graph: commits, pull requests, issues and reviews, private organization
-work included. The heatmap and streak use
-GitHub's calendar days, which follow your local time zone, over the last year like the profile
+work included. Today, this week, this month and this year start at midnight
+in Jakarta (UTC+7), whatever the machine's time zone. The heatmap and streak use
+GitHub's own calendar days over the last year like the profile
 graph, so streaks carry across January 1st and the longest streak is the
 longest in the last year. Weekday totals, best day and average count this
 year only. If `gh` is missing or signed out, the

@@ -398,10 +398,11 @@ do
 end
 do
   local gh = require 'plugins.github.data'
-  local function utc(y, m, d) return os.date('!%Y-%m-%dT%H:%M:%SZ', os.time({year = y, month = m, day = d, hour = 0})) end
-  local w = gh.windows(os.time({year = 2026, month = 10, day = 14, hour = 15}))
+  local w = gh.windows(1792000800) -- 2026-10-14 18:00 UTC, already Thursday the 15th in Jakarta
   check(#w == 4 and w[1].label == 'Today' and w[4].label == 'This year', 'GitHub windows are ordered')
-  check(w[1].from == utc(2026, 10, 14) and w[2].from == utc(2026, 10, 12) and w[3].from == utc(2026, 10, 1) and w[4].from == utc(2026, 1, 1), 'GitHub windows start at local midnight, Monday, the 1st and Jan 1st')
+  check(w[1].from == '2026-10-15T00:00:00+07:00' and w[2].from == '2026-10-12T00:00:00+07:00' and w[3].from == '2026-10-01T00:00:00+07:00' and w[4].from == '2026-01-01T00:00:00+07:00', 'GitHub windows start at Jakarta midnight, Monday, the 1st and Jan 1st')
+  local nye = gh.windows(1767202200) -- 2025-12-31 17:30 UTC, 00:30 on Jan 1st in Jakarta
+  check(nye[1].from == '2026-01-01T00:00:00+07:00' and nye[2].from == '2025-12-29T00:00:00+07:00' and nye[4].from == '2026-01-01T00:00:00+07:00' and gh.today(1767202200) == '2026-01-01', 'Jakarta new year starts before UTC does')
   check(gh.query(w):find('w4: contributionsCollection(from: "' .. w[4].from .. '")', 1, true), 'GitHub query aliases each window')
   local function days(counts)
     local result = {}

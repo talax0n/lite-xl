@@ -7,21 +7,21 @@ local M = {}
 
 local LABELS = {"Today", "This week", "This month", "This year"}
 
+-- Windows start at Asia/Jakarta midnights (UTC+7, no DST). GitHub honours the offset only when it is
+-- written out; a "Z" timestamp gets snapped to the UTC day.
+local OFFSET, DAY = 7 * 3600, 86400
+
 function M.windows(now)
-  local t = os.date("*t", now)
-  local starts = {
-    {year = t.year, month = t.month, day = t.day},
-    {year = t.year, month = t.month, day = t.day - (t.wday + 5) % 7},
-    {year = t.year, month = t.month, day = 1},
-    {year = t.year, month = 1, day = 1},
-  }
+  local t = os.date("!*t", now + OFFSET)
+  local midnight = now - (now + OFFSET) % DAY
+  local starts = {midnight, midnight - (t.wday + 5) % 7 * DAY, midnight - (t.day - 1) * DAY, midnight - (t.yday - 1) * DAY}
   local result = {}
-  for i, start in ipairs(starts) do
-    start.hour = 0
-    result[i] = {label = LABELS[i], from = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time(start))}
-  end
+  for i, start in ipairs(starts) do result[i] = {label = LABELS[i], from = os.date("!%Y-%m-%dT%H:%M:%S+07:00", start + OFFSET)} end
   return result
 end
+
+-- Today's "YYYY-MM-DD" in Jakarta.
+function M.today(now) return os.date("!%Y-%m-%d", now + OFFSET) end
 
 local TOTALS = "totalCommitContributions totalPullRequestContributions totalIssueContributions totalPullRequestReviewContributions restrictedContributionsCount"
 
@@ -66,7 +66,7 @@ function M.parse(graphql_json)
   return model
 end
 
--- `today` is a "YYYY-MM-DD" date in the calendar's own days (the viewer's local time zone). Ranges are nil for a 0 streak.
+-- `today` is a "YYYY-MM-DD" date in the calendar's own days (Jakarta, see M.today). Ranges are nil for a 0 streak.
 local function upto(days, today)
   local last = 0
   for i, day in ipairs(days) do if day.date <= today then last = i end end

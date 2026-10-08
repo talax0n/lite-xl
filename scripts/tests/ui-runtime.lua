@@ -156,6 +156,54 @@ function core.init(...)
     assert(table.concat(drawn, '\n'):find('gh auth login', 1, true), 'GitHub auth hint missing')
     command.perform('github:toggle'); command.perform('backlog:toggle')
     assert(not ghp.visible and not bp.visible, 'GitHub panel or Backlog did not hide')
+    local database = require 'plugins.database'
+    local function until_ok(cond, message)
+      local limit = system.get_time() + 10
+      repeat coroutine.yield(0.05) until cond() or system.get_time() > limit
+      assert(cond(), message)
+    end
+    local dbfile = workspace .. '/ui db.sqlite'
+    assert(scm.git.exec(workspace, 'sqlite3', {dbfile}, [[create table "my ""odd' table" (id integer, note text); insert into "my ""odd' table" values (1, 'a, b');]]))
+    assert(command.perform('database:toggle'))
+    coroutine.yield(0.1)
+    local dp = database.panel()
+    assert(dp.visible and dp.size.x > 0 and dp.position.x > core.root_view:get_primary_node().position.x, 'Database panel not docked on the right')
+    assert(database.save_connection('ui db', 'sqlite://' .. dbfile))
+    local conf = USERDIR .. PATHSEP .. 'databases.conf'
+    local fp = assert(io.open(conf, 'rb')); local conf_text = fp:read('*a'); fp:close()
+    assert(conf_text == 'ui db = sqlite://' .. dbfile .. '\n', 'databases.conf wrote: ' .. conf_text)
+    assert(scm.git.exec(workspace, 'ls', {'-l', conf}):match('^%-rw%-%-%-%-%-%-%-'), 'databases.conf is not mode 600')
+    local cnode
+    for _, n in ipairs(database.nodes) do if n.conn.name == 'ui db' then cnode = n end end
+    assert(cnode and cnode.state == 'idle', 'Saved connection not listed')
+    database.toggle(cnode); until_ok(function() return cnode.state == 'ok' end, 'Schemas not loaded: ' .. tostring(cnode.error))
+    local schema = cnode.children[1]
+    assert(schema.label == 'main', 'SQLite schema missing')
+    database.toggle(schema); until_ok(function() return schema.state == 'ok' end, 'Tables not loaded: ' .. tostring(schema.error))
+    local tnode = schema.children[1]
+    assert(tnode and tnode.label == 'my "odd\' table', 'Odd table not listed')
+    dp:draw()
+    local dbh = style.font:get_height() + style.padding.y
+    for i, row in ipairs(dp.rows) do if row.node == tnode and not row.text then
+      dp:on_mouse_pressed('left', dp.position.x + 30, dp.position.y + math.floor(dbh * 1.5) + (i - 1) * dbh + 2 - dp.scroll.y, 1)
+    end end
+    local results
+    until_ok(function() results = core.active_view; return results:is(database.Results) and not results.loading and results.cells end, 'Preview tab did not open')
+    assert(table.concat(results.columns, ',') == 'id,note' and results.rows[1][1] == '1' and results.rows[1][2] == 'a, b', 'Preview cells wrong')
+    assert(results.note == '1 row · first 100 rows', 'Preview note: ' .. tostring(results.note))
+    results:draw()
+    until_ok(function() return tnode.state == 'ok' and #tnode.children == 2 and tnode.children[2].detail == 'TEXT' end, 'Columns not loaded')
+    local sql_path = workspace .. '/q.sql'
+    fp = assert(io.open(sql_path, 'wb')); fp:write('-- count\nselect count(*) as n from "my ""odd\' table"\n'); fp:close()
+    core.root_view:open_doc(core.open_doc(sql_path))
+    assert(command.perform('database:run-query'))
+    until_ok(function() results = core.active_view; return results:is(database.Results) and not results.loading and results.cells end, 'Query tab did not open')
+    assert(results.columns[1] == 'n' and results.rows[1][1] == '1' and results.note == '1 row', 'Query result wrong: ' .. tostring(results.error))
+    assert(database.save_connection('broken', 'mysql://x/y'))
+    for _, n in ipairs(database.nodes) do if n.conn.name == 'broken' then assert(n.state == 'error' and n.error:find('Unsupported', 1, true), 'Bad URL not flagged') end end
+    dp:draw()
+    command.perform('database:toggle')
+    assert(not dp.visible, 'Database panel did not hide')
     local views = require 'plugins.scm.views'
     local tv = views.Text('t', 'diff --git a/f.lua b/f.lua\n@@ -1 +1 @@\n-old\n+new\n')
     assert(#tv.files == 1 and tv.rows[#tv.rows].file == tv.files[1], 'Diff rows not linked to files')
@@ -430,7 +478,7 @@ function core.init(...)
       assert(command.map[name], name .. ' missing')
     end
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
-    print('PASS: nested workspace repositories, activity bar, source control sections, backlog, GitHub panel, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
+    print('PASS: nested workspace repositories, activity bar, source control sections, backlog, GitHub panel, database panel, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)
   end
   core.add_thread(function()

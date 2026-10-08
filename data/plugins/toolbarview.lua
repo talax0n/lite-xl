@@ -17,6 +17,16 @@ local function tree() return package.loaded["plugins.treeview"] end
 local function backlog() return package.loaded["plugins.backlog"] end
 local function backlog_visible() local b = backlog(); local p = b and b.panel(); return p and p.visible end
 local function github_visible() local g = package.loaded["plugins.github"]; local p = g and g.panel(); return p and p.visible end
+local function database_visible() local d = package.loaded["plugins.database"]; local p = d and d.panel(); return p and p.visible end
+
+-- Stacked disks: the usual database glyph, which the icon font lacks.
+local function draw_database(x, y, w, h, color)
+  local t = math.max(1, math.floor(2 * SCALE))
+  local left, right, top, bottom = math.floor(x + w * 0.2), math.floor(x + w * 0.8), math.floor(y + h * 0.15), math.floor(y + h * 0.85)
+  renderer.draw_rect(left, top, t, bottom - top, color)
+  renderer.draw_rect(right - t, top, t, bottom - top, color)
+  for i = 0, 3 do renderer.draw_rect(left, math.floor(top + (bottom - top - t) * i / 3), right - left, t, color) end
+end
 
 function ToolbarView:new()
   ToolbarView.super.new(self)
@@ -33,6 +43,7 @@ function ToolbarView:new()
     {symbol = "B", command = "backlog:toggle", name = "Backlog", active = backlog_visible,
       badge = function() local b = backlog(); return b and b.open_count() or 0 end},
     {symbol = "g", command = "github:toggle", name = "GitHub", active = github_visible},
+    {command = "database:toggle", name = "Database", draw = draw_database, active = database_visible},
     {command = "terminal:toggle", name = "Terminal", text = ">_",
       active = function() local t = package.loaded["plugins.terminal"]; local p = t and t.panel and t.panel(); return p and p.visible end},
     {symbol = "P", command = "core:open-user-module", name = "Settings", bottom = true},
@@ -96,6 +107,7 @@ function ToolbarView:draw()
     if active then renderer.draw_rect(x, y, math.max(1, math.floor(2 * SCALE)), h, style.accent) end
     local ix, iy = x + (w - icon) / 2, y + (h - icon) / 2
     if item.git then draw_git(ix, iy, icon, icon, color)
+    elseif item.draw then item.draw(ix, iy, icon, icon, color)
     elseif item.text then common.draw_text(style.code_font, color, item.text, "center", x, y, w, h)
     else common.draw_text(self.toolbar_font, color, item.symbol, "center", x, y, w, h) end
     local count = item.badge and item.badge() or 0

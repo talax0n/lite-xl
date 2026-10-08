@@ -698,8 +698,11 @@ end
 
 
 -- Return true iff it is a locked pane along the rezise axis and is
--- declared "resizable".
+-- declared "resizable", or a split of two such panes (nested locked columns).
 function Node:is_locked_resizable(axis)
+  if self.type ~= "leaf" then
+    return self.a:is_locked_resizable(axis) and self.b:is_locked_resizable(axis)
+  end
   return self.locked and self.locked[axis] and self.resizable
 end
 
@@ -722,10 +725,10 @@ function Node:resize(axis, value)
       if self.a:is_locked_resizable(axis) and self.b:is_locked_resizable(axis) then
         local rem_value = value - self.a.size[axis]
         if rem_value >= 0 then
-          return self.b.active_view:set_target_size(axis, rem_value)
+          return self.b:resize(axis, rem_value)
         else
-          self.b.active_view:set_target_size(axis, 0)
-          return self.a.active_view:set_target_size(axis, value)
+          self.b:resize(axis, 0)
+          return self.a:resize(axis, value)
         end
       end
     else

@@ -57,6 +57,48 @@ function core.init(...)
     core.root_view:on_mouse_released('left', ex + 150, ey)
     assert(tree.target_size >= w0 + 140, 'Explorer divider does not drag: ' .. w0 .. ' -> ' .. tree.target_size)
     tree:set_target_size('x', w0)
+    local projects = require 'plugins.projects'
+    local parent = workspace .. '/parent'
+    assert(system.mkdir(parent))
+    for _, name in ipairs({'gamma', 'alpha', 'Beta'}) do assert(system.mkdir(parent .. '/' .. name)) end
+    run(parent .. '/alpha', {'init'}); run(parent .. '/gamma', {'init'})
+    for _, name in ipairs({'x', 'y'}) do io.open(parent .. '/alpha/' .. name, 'w'):close() end
+    config.plugins.projects.root = parent
+    projects:refresh()
+    deadline = system.get_time() + 5
+    repeat coroutine.yield(0.1) until projects.rows[1].count == 2 and math.abs(projects.size.x - config.plugins.projects.width * SCALE) < 1 or system.get_time() > deadline
+    local names = {}; for _, row in ipairs(projects.rows) do names[#names + 1] = row.name end
+    assert(table.concat(names, ',') == 'alpha,Beta,gamma', 'Projects rows: ' .. table.concat(names, ','))
+    assert(projects.rows[1].count == 2 and not projects.rows[2].count, 'Projects change count missing')
+    local toolbar = tree.toolbar
+    assert(toolbar.position.x + toolbar.size.x <= projects.position.x and projects.position.x + projects.size.x <= tree.position.x, 'Projects column not between activity bar and tree')
+    local function click(row)
+      for y = projects.position.y, projects.position.y + projects.size.y do
+        if projects:row_at(projects.position.x + 10, y) == row then return projects:on_mouse_pressed('left', projects.position.x + 10, y + 1, 1) end
+      end
+      error('Projects row not on screen: ' .. row.name)
+    end
+    local open_project, opened = core.open_project, nil
+    core.open_project = function(path) opened = path end
+    click(projects.rows[2])
+    assert(opened == parent .. '/Beta', 'Projects click did not switch: ' .. tostring(opened))
+    config.plugins.projects.root = nil
+    projects:refresh(); opened = nil
+    for _, row in ipairs(projects.rows) do if row.path == core.root_project().path then click(row) end end
+    core.open_project = open_project
+    assert(opened == nil, 'Clicking the current project reopened it')
+    local pw, px, py = config.plugins.projects.width, projects.position.x + projects.size.x, projects.position.y + 50
+    core.root_view:on_mouse_pressed('left', px, py, 1)
+    core.root_view:on_mouse_moved(px + 60, py, 60, 0)
+    core.root_view:on_mouse_released('left', px + 60, py)
+    assert(config.plugins.projects.width * SCALE >= pw * SCALE + 50, 'Projects divider does not drag: ' .. pw .. ' -> ' .. config.plugins.projects.width)
+    assert(toolbar.size.x == toolbar:get_width(), 'Activity bar width changed')
+    config.plugins.projects.width = pw
+    -- The dummy window is narrow; the right-docked panels below need the room.
+    assert(command.perform('projects:toggle'))
+    deadline = system.get_time() + 3
+    repeat coroutine.yield(0.05) until projects.size.x == 0 or system.get_time() > deadline
+    assert(projects.size.x == 0 and tree.size.x > 0, 'projects:toggle did not hide only the column')
     assert(core.compose_window_title('') == 'TreX', 'Window branding missing')
     assert(command.perform('scm:toggle'))
     assert(command.perform('terminal:new'))
@@ -490,7 +532,7 @@ function core.init(...)
       assert(command.map[name], name .. ' missing')
     end
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
-    print('PASS: nested workspace repositories, activity bar, source control sections, backlog, GitHub panel, database panel, autosave, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
+    print('PASS: nested workspace repositories, activity bar, source control sections, backlog, GitHub panel, database panel, autosave, background sync, projects column, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)
   end
   core.add_thread(function()

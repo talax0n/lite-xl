@@ -48,7 +48,7 @@ M.DRIVERS = {
       }
     end,
     schemas_sql = "select schema_name from information_schema.schemata where schema_name not in ('pg_catalog', 'information_schema') and schema_name not like 'pg\\_%' order by 1",
-    tables_sql = function(schema) return "select table_name, table_type from information_schema.tables where table_schema = " .. literal(schema) .. " order by 1" end,
+    tables_sql = function(schema) return "select table_name, lower(replace(table_type, 'BASE ', '')) from information_schema.tables where table_schema = " .. literal(schema) .. " order by 1" end,
     columns_sql = function(schema, table)
       return "select column_name, data_type from information_schema.columns where table_schema = " .. literal(schema) .. " and table_name = " .. literal(table) .. " order by ordinal_position"
     end,

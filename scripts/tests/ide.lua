@@ -503,5 +503,34 @@ insert into "my ""odd' table" values (1, 'a, b' || char(10) || 'say "hi"', NULL)
     check(not git.exec(tmp, exe, a, input, 35, e) and #sql(d.preview_sql('main', 'my "odd\' table'), true).rows == 1, 'Read-only browse refuses writes')
   end)
 end
+do
+  local projects = require 'plugins.projects.data'
+  -- The runner's system module has no directory listing and no dir type; the shell stands in.
+  system.list_dir = system.list_dir or function(path)
+    local p, names = io.popen("ls -A '" .. path .. "'"), {}
+    for name in p:lines() do names[#names + 1] = name end
+    p:close(); return names
+  end
+  local file_info = system.get_file_info
+  system.get_file_info = function(path)
+    if os.execute("test -d '" .. path .. "'") then return {type = 'dir'} end
+    if os.execute("test -e '" .. path .. "'") then return {type = 'file'} end
+  end
+  local root = tmp .. '/projects'
+  for _, name in ipairs({'b', 'A', '.hidden', 'node_modules'}) do assert(os.execute('mkdir -p ' .. root .. '/' .. name)) end
+  io.open(root .. '/f.txt', 'w'):close()
+  local names = {}; for _, row in ipairs(projects.list(root)) do names[#names + 1] = row.name end
+  check(table.concat(names, ',') == 'A,b', 'Projects list skips hidden, node_modules and files, sorted: ' .. table.concat(names, ','))
+  check(projects.count(' M a\n?? b\n\n') == 2 and projects.count('') == 0, 'Porcelain line count')
+  run(function()
+    local repo = root .. '/A'
+    g(repo, {'init', '-b', 'main'}); io.open(repo .. '/t', 'w'):close(); g(repo, {'add', 't'})
+    g(repo, {'-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-m', 'base'})
+    for _, name in ipairs({'t', 'u1', 'u2'}) do local f = io.open(repo .. '/' .. name, 'w'); f:write('x'); f:close() end
+    check(projects.list(root)[1].git and not projects.list(root)[2].git, 'Projects detect .git')
+    check(projects.count(g(repo, {'status', '--porcelain'})) == 3, 'Porcelain count on a real repository')
+  end)
+  system.get_file_info = file_info
+end
 assert(os.execute('rm -rf ' .. tmp))
 print(string.format('PASS: %d checks against real Git repositories and a native PTY', checks))

@@ -125,6 +125,13 @@ that does not start with `select`, `with`, `explain`, `show`, `pragma`,
 seconds, and the Postgres password goes to `psql` through `PGPASSWORD`, never
 on the command line.
 
+## Autosave
+
+TreX saves a file one second after you stop typing in it. Untitled buffers are
+not saved until you give them a name. To change the delay or turn it off, set
+`config.plugins.autosave.delay` (seconds) or `config.plugins.autosave.enabled =
+false` in your user module.
+
 ## Terminal
 
 Press **Ctrl+`** to toggle the terminal, or **Ctrl+Shift+`** for a new session.

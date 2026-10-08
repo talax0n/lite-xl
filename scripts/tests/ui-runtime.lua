@@ -194,6 +194,17 @@ function core.init(...)
     assert(results.note == '1 row · first 100 rows', 'Preview note: ' .. tostring(results.note))
     results:draw()
     until_ok(function() return tnode.state == 'ok' and #tnode.children == 2 and tnode.children[2].detail == 'TEXT' end, 'Columns not loaded')
+    local auto_path = workspace .. '/auto.txt'
+    fp = assert(io.open(auto_path, 'wb')); fp:write('one\n'); fp:close()
+    local auto = core.root_view:open_doc(core.open_doc(auto_path)).doc
+    auto:insert(1, 1, 'zero\n')
+    assert(auto:is_dirty(), 'Edit did not dirty the doc')
+    until_ok(function() return not auto:is_dirty() end, 'Autosave did not save the edit')
+    fp = assert(io.open(auto_path, 'rb')); local autosaved = fp:read('*a'); fp:close()
+    assert(autosaved == 'zero\none\n', 'Autosave wrote: ' .. autosaved)
+    local untitled = core.root_view:open_doc(core.open_doc()).doc; untitled:insert(1, 1, 'scratch')
+    coroutine.yield(1.5)
+    assert(untitled:is_dirty() and not untitled.filename, 'Untitled buffer was saved')
     local sql_path = workspace .. '/q.sql'
     fp = assert(io.open(sql_path, 'wb')); fp:write('-- count\nselect count(*) as n from "my ""odd\' table"\n'); fp:close()
     core.root_view:open_doc(core.open_doc(sql_path))
@@ -479,7 +490,7 @@ function core.init(...)
       assert(command.map[name], name .. ' missing')
     end
     for _, item in ipairs(core.log_items) do assert(not item.text:match('stack traceback'), item.text) end
-    print('PASS: nested workspace repositories, activity bar, source control sections, backlog, GitHub panel, database panel, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
+    print('PASS: nested workspace repositories, activity bar, source control sections, backlog, GitHub panel, database panel, autosave, background sync, TreX branding, pane layout, terminal input, splits, and cleanup')
     core.quit(true)
   end
   core.add_thread(function()
